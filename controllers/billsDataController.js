@@ -48,8 +48,6 @@ export const getBillsReport = async (req, res) => {
       params.push(Number(warehouse_id));
     }
 
-    console.log("created_at:", created_at);
-
     if (created_at?.trim()) {
       baseSql += `
     AND bd.created_at >= ?
@@ -216,7 +214,7 @@ export const importBillsData = async (req, res) => {
         r.NO_BILL || null,
         r.REFERENCE || null,
         excelDateToMySQL(r.SEND_DATE) || null,
-        r.CUSTOMER_NAME || null,
+        r.SHIPPER_CODE || null,
         r.RECIPIENT_CODE || null,
         r.RECIPIENT_NAME || null,
         r.RECIPIENT_TEL || null,

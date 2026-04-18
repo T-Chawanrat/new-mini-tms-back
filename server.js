@@ -5,28 +5,40 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import morgan from "morgan";
-import authRoute from "./routes/authRoute.js";
+// import authRoute from "./routes/";
 import billRoute from "./routes/billRoute.js";
 import billsDataRoute from "./routes/billsDataRoute.js";
-import filterRoute from "./routes/filterRoute.js";
+import filterRoute from "./routes/filter.routes.js";
 import labelRoute from "./routes/labelRoute.js";
+import authRoute from "./routes/auth.routes.js";
+import manageRoutes from "./routes/manage.route.js";
+import shipmentsRoute from "./routes/shipments.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(morgan("dev"));
+app.use(
+  morgan("dev", {
+    skip: (req, res) => {
+      return req.url.startsWith("/uploads");
+    },
+  })
+);
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/labels", express.static(path.join(__dirname, "labels")));
 
-app.use("/", authRoute);
+// app.use("/", authRoute);
 app.use("/", billRoute);
 app.use("/", billsDataRoute);
 app.use("/", filterRoute);
 app.use("/", labelRoute);
+app.use("/", authRoute);
+app.use("/manage", manageRoutes);
+app.use("/shipments", shipmentsRoute);
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

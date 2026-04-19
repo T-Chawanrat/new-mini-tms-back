@@ -1,14 +1,14 @@
 import db from "../config/db.js";
-import { normalizePlate, isValidPlate } from "../utils/plate.js";
-
-/* =========================
-   USERS (HR / IT / DEV)
-========================= */
+import { formatDateOnly } from "../utils/formatDate.js";
+import { buildLike } from "../utils/cleanText.js";
 
 // GET ALL USERS
 export const getUsers = async (req, res) => {
   try {
     const { role_id, is_active, search } = req.query;
+
+    // 🔥 ดึง role จาก header fallback (กัน undefined)
+    const currentRole = req.user?.role_id || Number(req.headers.role_id);
 
     let sql = `
       SELECT 
@@ -16,40 +16,52 @@ export const getUsers = async (req, res) => {
         u.username,
         u.first_name,
         u.last_name,
-
         u.role_id,
         r.name AS role_name,
-
         u.customer_id,
-
         u.warehouse_id,
         w.name AS warehouse_name,
-
         u.is_active,
         u.license_no,
         u.license_expire,
         u.last_login,
         u.created_at
-
       FROM um_users u
-
-      LEFT JOIN mm_roles r 
-        ON u.role_id = r.id
-
-      LEFT JOIN mm_warehouses w 
-        ON u.warehouse_id = w.id
-
+      LEFT JOIN mm_roles r ON u.role_id = r.id
+      LEFT JOIN mm_warehouses w ON u.warehouse_id = w.id
       WHERE 1=1
     `;
 
     const params = [];
 
     // =====================
+    // 🔥 PERMISSION
+    // =====================
+    let allowedRoles = null;
+
+    if (currentRole === 9) {
+      allowedRoles = [3, 4, 5, 6, 7, 8, 9];
+    } else if (currentRole === 10) {
+      allowedRoles = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+    }
+
+    if (allowedRoles) {
+      sql += ` AND u.role_id IN (${allowedRoles.map(() => "?").join(",")})`;
+      params.push(...allowedRoles);
+    }
+
+    // =====================
     // 🔥 FILTER role
     // =====================
-    if (role_id) {
+    if (role_id !== undefined) {
+      const roleNum = Number(role_id);
+
+      if (allowedRoles && !allowedRoles.includes(roleNum)) {
+        return res.json([]);
+      }
+
       sql += ` AND u.role_id = ?`;
-      params.push(role_id);
+      params.push(roleNum);
     }
 
     // =====================
@@ -66,18 +78,13 @@ export const getUsers = async (req, res) => {
     if (search) {
       sql += `
         AND (
-          u.username LIKE ?
-          OR u.first_name LIKE ?
-          OR u.last_name LIKE ?
+          ${buildLike("u.username", search)}
+          OR ${buildLike("u.first_name", search)}
+          OR ${buildLike("u.last_name", search)}
         )
       `;
-      const s = `%${search}%`;
-      params.push(s, s, s);
     }
 
-    // =====================
-    // 🔥 ORDER
-    // =====================
     sql += ` ORDER BY u.id DESC`;
 
     const [rows] = await db.query(sql, params);
@@ -88,8 +95,6 @@ export const getUsers = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-import { formatDateOnly } from "../utils/formatDate.js";
 
 export const createUser = async (req, res) => {
   let connection;
@@ -156,7 +161,7 @@ export const createUser = async (req, res) => {
 
     let finalWarehouse = null;
 
-    if ([3, 4, 9].includes(role)) {
+    if ([3, 4, 9, 10].includes(role)) {
       finalWarehouse = null;
     } else if (role === 6) {
       finalWarehouse = 15;
@@ -259,11 +264,49 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-/* =========================
-   VEHICLES
-========================= */
+export const deleteUserHard = async (req, res) => {
+  let connection;
 
-// GET ALL VEHICLES
+  try {
+    const { id } = req.params;
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    // 🔥 ลบ relation ก่อน (กัน FK error)
+    await connection.query(`DELETE FROM um_user_zones WHERE user_id = ?`, [id]);
+
+    await connection.query(`DELETE FROM um_user_vehicles WHERE user_id = ?`, [
+      id,
+    ]);
+
+    // 🔥 ลบ user จริง
+    const [result] = await connection.query(
+      `DELETE FROM um_users WHERE id = ?`,
+      [id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      connection.release();
+
+      return res.status(404).json({
+        message: "user not found",
+      });
+    }
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ message: "hard delete success" });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    if (connection) connection.release();
+
+    res.status(500).json({ message: err.message });
+  }
+};
+
 export const getVehicles = async (req, res) => {
   try {
     const { search, vehicle_type, usage_type, status } = req.query;
@@ -276,17 +319,15 @@ export const getVehicles = async (req, res) => {
 
     const params = [];
 
-    // 🔥 SEARCH
+    // 🔥 SEARCH (ใช้ util)
     if (search) {
       sql += `
         AND (
-          license_plate LIKE ?
-          OR brand LIKE ?
-          OR model LIKE ?
+          ${buildLike("license_plate", search)}
+          OR ${buildLike("brand", search)}
+          OR ${buildLike("model", search)}
         )
       `;
-      const s = `%${search}%`;
-      params.push(s, s, s);
     }
 
     // 🔥 FILTER
@@ -398,10 +439,10 @@ export const updateVehicle = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    await db.query(
-      `UPDATE mm_vehicles SET status = ? WHERE id = ?`,
-      [status, id]
-    );
+    await db.query(`UPDATE mm_vehicles SET status = ? WHERE id = ?`, [
+      status,
+      id,
+    ]);
 
     res.json({ message: "update success" });
   } catch (err) {
@@ -424,6 +465,230 @@ export const deleteVehicle = async (req, res) => {
 
     res.json({ message: "delete success" });
   } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getCustomers = async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    let sql = `
+      SELECT *
+      FROM mm_customers
+      WHERE 1=1
+    `;
+
+    if (search) {
+      sql += `
+        AND (
+          ${buildLike("name", search)}
+          OR ${buildLike("code", search)}
+        )
+      `;
+    }
+
+    sql += ` ORDER BY id DESC`;
+
+    const [rows] = await db.query(sql);
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* ================= CUSTOMER ================= */
+
+export const createCustomer = async (req, res) => {
+  try {
+    const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
+
+    const [result] = await db.query(
+      `
+      INSERT INTO mm_customers
+      (code, name, import_type, tax_id, address, contact_name, contact_tel, is_active)
+      VALUES (?, ?, 'STD', ?, ?, ?, ?, 1)
+    `,
+      [code, name, tax_id, address, contact_name, contact_tel],
+    );
+
+    res.json({ message: "create success", id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const updateCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
+
+    await db.query(
+      `
+      UPDATE mm_customers SET
+        code = ?,
+        name = ?,
+        import_type = 'STD',
+        tax_id = ?,
+        address = ?,
+        contact_name = ?,
+        contact_tel = ?
+      WHERE id = ?
+    `,
+      [code, name, tax_id, address, contact_name, contact_tel, id],
+    );
+
+    res.json({ message: "update success" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteCustomer = async (req, res) => {
+  let connection;
+
+  try {
+    const { id } = req.params;
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    // 🔥 ปิด customer
+    const [result] = await connection.query(
+      `UPDATE mm_customers SET is_active = 0 WHERE id = ?`,
+      [id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      connection.release();
+
+      return res.status(404).json({
+        message: "customer not found",
+      });
+    }
+
+    // 🔥 ปิด user ของ customer นี้ทั้งหมด
+    await connection.query(
+      `UPDATE um_users SET is_active = 0 WHERE customer_id = ?`,
+      [id],
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ message: "delete success" });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    if (connection) connection.release();
+
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteCustomerHard = async (req, res) => {
+  let connection;
+
+  try {
+    const { id } = req.params;
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    // 🔥 ลบ user ของ customer ก่อน (กัน FK / orphan)
+    await connection.query(`DELETE FROM um_users WHERE customer_id = ?`, [id]);
+
+    // 🔥 ลบ customer จริง
+    const [result] = await connection.query(
+      `DELETE FROM mm_customers WHERE id = ?`,
+      [id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      connection.release();
+
+      return res.status(404).json({
+        message: "customer not found",
+      });
+    }
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ message: "hard delete success" });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    if (connection) connection.release();
+
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const createCustomerUser = async (req, res) => {
+  let connection;
+
+  try {
+    const { username, password, first_name, last_name, customer_id } = req.body;
+
+    if (!username || !password || !customer_id) {
+      return res.status(400).json({
+        message: "username / password / customer required",
+      });
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    // 🔥 check username ซ้ำ
+    const [exists] = await connection.query(
+      `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
+      [username],
+    );
+
+    if (exists.length > 0) {
+      await connection.rollback();
+      connection.release();
+
+      return res.status(400).json({
+        message: "username นี้มีในระบบแล้ว",
+      });
+    }
+
+    const CUSTOMER_ROLE = 2;
+
+    // 🔥 insert (ไม่มี warehouse / license)
+    const [result] = await connection.query(
+      `
+      INSERT INTO um_users (
+        username, password, first_name, last_name,
+        role_id, customer_id, warehouse_id,
+        license_no, license_expire, is_active
+      )
+      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 1)
+      `,
+      [
+        username,
+        password,
+        first_name || null,
+        last_name || null,
+        CUSTOMER_ROLE,
+        customer_id,
+      ],
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({
+      message: "create customer user success",
+      id: result.insertId,
+    });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    if (connection) connection.release();
+
     res.status(500).json({ message: err.message });
   }
 };

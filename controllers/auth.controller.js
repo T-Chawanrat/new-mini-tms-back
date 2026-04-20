@@ -1,4 +1,5 @@
 import db from "../config/db.js";
+import jwt from "jsonwebtoken";
 import { ROLES } from "../utils/roles.js";
 
 export const login = async (req, res) => {
@@ -29,7 +30,7 @@ export const login = async (req, res) => {
       WHERE username = ? AND is_active = 1
       LIMIT 1
       `,
-      [username]
+      [username],
     );
 
     if (rows.length === 0) {
@@ -48,10 +49,9 @@ export const login = async (req, res) => {
     }
 
     // update last login
-    await db.query(
-      "UPDATE um_users SET last_login = NOW() WHERE id = ?",
-      [user.id]
-    );
+    await db.query("UPDATE um_users SET last_login = NOW() WHERE id = ?", [
+      user.id,
+    ]);
 
     // =====================
     // EXTRA DATA
@@ -67,7 +67,7 @@ export const login = async (req, res) => {
         JOIN mm_zones z ON uz.zone_id = z.id
         WHERE uz.user_id = ?
         `,
-        [user.id]
+        [user.id],
       );
       zones = zoneRows;
     }
@@ -80,13 +80,23 @@ export const login = async (req, res) => {
         JOIN mm_vehicles v ON uv.vehicle_id = v.id
         WHERE uv.user_id = ? AND uv.unassigned_at IS NULL
         `,
-        [user.id]
+        [user.id],
       );
       vehicles = vehicleRows;
     }
 
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role_id: user.role_id,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" },
+    );
+
     return res.json({
       message: "เข้าสู่ระบบสำเร็จ",
+      token,
       user: {
         id: user.id,
         username: user.username,

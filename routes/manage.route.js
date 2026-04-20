@@ -18,27 +18,31 @@ import {
 } from "../controllers/manage.controller.js";
 
 import { allow } from "../middlewares/allow.js";
+import { auth } from "../middlewares/auth.js"; // 🔥 เพิ่ม
 
 const router = express.Router();
 
 // USERS
-router.get("/users", getUsers);
-router.post("/users", allow(1, 9, 10), createUser);
-router.put("/users/:id", allow(1, 9, 10), updateUser);
-router.delete("/users/:id", allow(1, 9, 10), deleteUser);
-router.delete("/users/:id/hard", allow(1, 10), deleteUserHard);
+router.get("/users", auth, getUsers);
+router.post("/users", auth, allow(1, 9, 10), createUser);
+router.put("/users/:id", auth, allow(1, 9, 10), updateUser);
+router.delete("/users/:id", auth, allow(1, 9, 10), deleteUser);
+router.delete("/users/:id/hard", auth, allow(1, 10), deleteUserHard);
 
 // VEHICLES
-router.get("/vehicles", getVehicles);
-router.post("/vehicles", allow(1, 3, 4, 5, 10), createVehicle);
-router.patch("/vehicles/:id", allow(1, 3, 4, 5, 10), updateVehicle);
-router.delete("/vehicles/:id", allow(1, 3, 4, 5, 10), deleteVehicle);
+router.get("/vehicles", auth, getVehicles);
+router.post("/vehicles", auth, allow(1, 3, 4, 5, 10), createVehicle);
+router.patch("/vehicles/:id", auth, allow(1, 3, 4, 5, 10), updateVehicle);
+router.delete("/vehicles/:id", auth, allow(1, 3, 4, 5, 10), deleteVehicle);
 
-router.get("/customers", getCustomers);
-router.post("/customers", allow(1, 3, 4, 5, 10), createCustomer);
-router.patch("/customers/:id", allow(1, 3, 4, 5, 10), updateCustomer);
-router.delete("/customers/:id", allow(1, 3, 4, 5, 10), deleteCustomer);
-router.delete("/customers/:id/hard", allow(1, 10), deleteCustomerHard);
-router.post("/customer-users", allow(1, 10), createCustomerUser);
+// CUSTOMERS
+router.get("/customers", auth, getCustomers);
+router.post("/customers", auth, allow(1, 3, 4, 5, 10), createCustomer);
+router.patch("/customers/:id", auth, allow(1, 3, 4, 5, 10), updateCustomer);
+router.delete("/customers/:id", auth, allow(1, 3, 4, 5, 10), deleteCustomer);
+router.delete("/customers/:id/hard", auth, allow(1, 10), deleteCustomerHard);
+
+// CUSTOMER USERS
+router.post("/customer-users", auth, allow(1, 10), createCustomerUser);
 
 export default router;

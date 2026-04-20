@@ -1,12 +1,25 @@
 import db from "../config/db.js";
 
+const cleanTel = (tel) => {
+  if (!tel) return "";
+
+  return tel
+    .toString()
+    .replace(/[^0-9]/g, "") // ลบ - space +
+    .replace(/^66/, "0"); // +66 → 0
+};
+
 // ================= STD =================
 export const importSTD = async (req, res) => {
   let connection;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { rows, file_name } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!rows || !rows.length) {
       return res.status(400).json({ message: "no rows" });
@@ -30,30 +43,67 @@ export const importSTD = async (req, res) => {
       )
       VALUES (?, NULL, 'STD', 'EXCEL', ?, ?, 0, 0)
       `,
-      [userId, file_name || null, rows.length]
+      [userId, file_name || null, rows.length],
     );
 
     const importLogId = logResult.insertId;
 
-    const values = rows.map((r) => [
-      r.SERIAL_NO,
-      r.NO_BILL,
-      r.REFERENCE,
-      null,
-      r.RECIPIENT_NAME,
-      r.RECIPIENT_TEL,
-      r.RECIPIENT_ADDRESS,
-      r.RECIPIENT_SUBDISTRICT,
-      r.RECIPIENT_DISTRICT,
-      r.RECIPIENT_PROVINCE,
-      r.RECIPIENT_ZIPCODE,
-      importLogId,
-      "STD",
-      importLogId,
-      userId,
-      1,
-    ]);
+    // =========================
+    // 🔥 VALIDATE + SPLIT DATA
+    // =========================
+    const values = [];
+    const errorLogs = [];
 
+    rows.forEach((r, index) => {
+      // 🔴 REQUIRED SERIAL
+      if (!r.SERIAL_NO) {
+        errorLogs.push([
+          importLogId,
+          index + 1,
+          "REQUIRED_SERIAL",
+          "SERIAL_NO is required",
+          JSON.stringify(r),
+        ]);
+        return;
+      }
+
+      const tel = cleanTel(r.RECIPIENT_TEL);
+
+      if (tel && !/^\d{9,10}$/.test(tel)) {
+        errorLogs.push([
+          importLogId,
+          index + 1,
+          "INVALID_TEL",
+          "เบอร์โทรไม่ถูกต้อง",
+          JSON.stringify(r),
+        ]);
+        return;
+      }
+
+      // ✅ OK → push insert
+      values.push([
+        r.SERIAL_NO,
+        null,
+        r.REFERENCE,
+        null,
+        r.RECIPIENT_NAME,
+        tel,
+        r.RECIPIENT_ADDRESS,
+        r.RECIPIENT_SUBDISTRICT,
+        r.RECIPIENT_DISTRICT,
+        r.RECIPIENT_PROVINCE,
+        r.RECIPIENT_ZIPCODE,
+        importLogId,
+        "STD",
+        importLogId,
+        userId,
+        1,
+      ]);
+    });
+
+    // =========================
+    // 🔥 INSERT SHIPMENTS
+    // =========================
     const chunkSize = 500;
     let insertIdStart = null;
     let totalInserted = 0;
@@ -72,7 +122,7 @@ export const importSTD = async (req, res) => {
         )
         VALUES ?
         `,
-        [chunk]
+        [chunk],
       );
 
       if (insertIdStart === null) {
@@ -82,15 +132,13 @@ export const importSTD = async (req, res) => {
       totalInserted += result.affectedRows;
     }
 
-    // 🔥 logs_shipment_status
+    // =========================
+    // 🔥 INSERT STATUS LOG
+    // =========================
     const statusLogs = [];
+
     for (let i = 0; i < totalInserted; i++) {
-      statusLogs.push([
-        insertIdStart + i,
-        "IMPORT",
-        null,
-        userId,
-      ]);
+      statusLogs.push([insertIdStart + i, "IMPORT", null, userId]);
     }
 
     if (statusLogs.length) {
@@ -101,27 +149,45 @@ export const importSTD = async (req, res) => {
         )
         VALUES ?
         `,
-        [statusLogs]
+        [statusLogs],
       );
     }
 
-    // 🔥 update logs_imports
+    // =========================
+    // 🔥 INSERT ERROR LOGS
+    // =========================
+    if (errorLogs.length) {
+      await connection.query(
+        `
+        INSERT INTO logs_import_errors (
+          import_log_id, row_no, error_code, error_message, raw_data
+        )
+        VALUES ?
+        `,
+        [errorLogs],
+      );
+    }
+
+    // =========================
+    // 🔥 UPDATE SUMMARY
+    // =========================
     await connection.query(
       `
       UPDATE logs_imports
-      SET success_rows = ?, failed_rows = 0
+      SET success_rows = ?, failed_rows = ?
       WHERE id = ?
       `,
-      [totalInserted, importLogId]
+      [totalInserted, errorLogs.length, importLogId],
     );
 
     await connection.commit();
     connection.release();
 
     res.json({
-      message: "import STD success",
+      message: "นำเข้าสำเร็จ",
       import_log_id: importLogId,
       total: totalInserted,
+      failed: errorLogs.length,
     });
   } catch (err) {
     if (connection) await connection.rollback();
@@ -136,8 +202,12 @@ export const importVGT = async (req, res) => {
   let connection;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { rows, file_name } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -150,7 +220,7 @@ export const importVGT = async (req, res) => {
       )
       VALUES (?, 30, 'VGT', 'EXCEL', ?, ?, 0, 0)
       `,
-      [userId, file_name || null, rows.length]
+      [userId, file_name || null, rows.length],
     );
 
     const importLogId = logResult.insertId;
@@ -178,13 +248,13 @@ export const importVGT = async (req, res) => {
       `
       INSERT INTO shipments (...) VALUES ?
       `,
-      [values]
+      [values],
     );
 
     await connection.commit();
     connection.release();
 
-    res.json({ message: "import VGT success" });
+    res.json({ message: "นำเข้าสำเร็จ" });
   } catch (err) {
     if (connection) await connection.rollback();
     if (connection) connection.release();
@@ -198,8 +268,12 @@ export const importADV = async (req, res) => {
   let connection;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { rows, file_name } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -212,7 +286,7 @@ export const importADV = async (req, res) => {
       )
       VALUES (?, 22, 'ADV', 'EXCEL', ?, ?, 0, 0)
       `,
-      [userId, file_name || null, rows.length]
+      [userId, file_name || null, rows.length],
     );
 
     const importLogId = logResult.insertId;
@@ -240,13 +314,13 @@ export const importADV = async (req, res) => {
       `
       INSERT INTO shipments (...) VALUES ?
       `,
-      [values]
+      [values],
     );
 
     await connection.commit();
     connection.release();
 
-    res.json({ message: "import ADV success" });
+    res.json({ message: "นำเข้าสำเร็จ" });
   } catch (err) {
     if (connection) await connection.rollback();
     if (connection) connection.release();

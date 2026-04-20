@@ -5,10 +5,13 @@ import { buildLike } from "../utils/cleanText.js";
 // GET ALL USERS
 export const getUsers = async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { role_id, is_active, search } = req.query;
 
-    // 🔥 ดึง role จาก header fallback (กัน undefined)
-    const currentRole = req.user?.role_id || Number(req.headers.role_id);
+    const currentRole = req.user.role_id;
 
     let sql = `
       SELECT 
@@ -34,9 +37,6 @@ export const getUsers = async (req, res) => {
 
     const params = [];
 
-    // =====================
-    // 🔥 PERMISSION
-    // =====================
     let allowedRoles = null;
 
     if (currentRole === 9) {
@@ -50,9 +50,6 @@ export const getUsers = async (req, res) => {
       params.push(...allowedRoles);
     }
 
-    // =====================
-    // 🔥 FILTER role
-    // =====================
     if (role_id !== undefined) {
       const roleNum = Number(role_id);
 
@@ -64,17 +61,11 @@ export const getUsers = async (req, res) => {
       params.push(roleNum);
     }
 
-    // =====================
-    // 🔥 FILTER status
-    // =====================
     if (is_active !== undefined) {
       sql += ` AND u.is_active = ?`;
       params.push(is_active);
     }
 
-    // =====================
-    // 🔥 SEARCH
-    // =====================
     if (search) {
       sql += `
         AND (
@@ -91,7 +82,9 @@ export const getUsers = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("GET USERS ERROR:", err);
+    console.error("❌ GET USERS ERROR:", err);
+    console.error("STACK:", err.stack);
+
     res.status(500).json({ message: err.message });
   }
 };
@@ -100,6 +93,10 @@ export const createUser = async (req, res) => {
   let connection;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const {
       username,
       password,
@@ -124,7 +121,6 @@ export const createUser = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    // 🔥 เพิ่ม validate username ซ้ำ (ไม่แตะ logic อื่น)
     const [exists] = await connection.query(
       `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
       [username],
@@ -218,9 +214,12 @@ export const createUser = async (req, res) => {
   }
 };
 
-// UPDATE USER
 export const updateUser = async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     const { first_name, last_name, license_expire } = req.body;
@@ -246,9 +245,12 @@ export const updateUser = async (req, res) => {
   }
 };
 
-// DELETE USER (soft)
 export const deleteUser = async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     await db.query(
@@ -268,19 +270,20 @@ export const deleteUserHard = async (req, res) => {
   let connection;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    // 🔥 ลบ relation ก่อน (กัน FK error)
     await connection.query(`DELETE FROM um_user_zones WHERE user_id = ?`, [id]);
-
     await connection.query(`DELETE FROM um_user_vehicles WHERE user_id = ?`, [
       id,
     ]);
 
-    // 🔥 ลบ user จริง
     const [result] = await connection.query(
       `DELETE FROM um_users WHERE id = ?`,
       [id],
@@ -307,8 +310,15 @@ export const deleteUserHard = async (req, res) => {
   }
 };
 
+/* ================= VEHICLES ================= */
+
 export const getVehicles = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { search, vehicle_type, usage_type, status } = req.query;
 
     let sql = `
@@ -358,6 +368,11 @@ export const getVehicles = async (req, res) => {
 
 export const createVehicle = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     let {
       license_plate,
       brand,
@@ -373,7 +388,6 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "license_plate required" });
     }
 
-    // 🔥 normalize อย่างเดียวพอ
     const plate = license_plate
       .toString()
       .trim()
@@ -381,14 +395,12 @@ export const createVehicle = async (req, res) => {
       .replace(/\s+/g, "")
       .replace(/-/g, "");
 
-    // ❗ ไม่ต้อง regex โหด เอาแค่ length กันพัง
     if (plate.length < 4) {
       return res.status(400).json({
         message: "ทะเบียนไม่ถูกต้อง",
       });
     }
 
-    // capacity
     if (capacity_kg === undefined || capacity_kg === "") {
       return res.status(400).json({ message: "capacity required" });
     }
@@ -396,7 +408,6 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "capacity must be number" });
     }
 
-    // status
     const allowedStatus = ["ACTIVE", "MAINTENANCE", "INACTIVE"];
     if (!allowedStatus.includes(status)) {
       return res.status(400).json({ message: "invalid status" });
@@ -436,6 +447,11 @@ export const createVehicle = async (req, res) => {
 
 export const updateVehicle = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
     const { status } = req.body;
 
@@ -450,9 +466,13 @@ export const updateVehicle = async (req, res) => {
   }
 };
 
-// DELETE VEHICLE (soft)
 export const deleteVehicle = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     const [result] = await db.query(`DELETE FROM mm_vehicles WHERE id = ?`, [
@@ -471,6 +491,11 @@ export const deleteVehicle = async (req, res) => {
 
 export const getCustomers = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { search } = req.query;
 
     let sql = `
@@ -502,6 +527,11 @@ export const getCustomers = async (req, res) => {
 
 export const createCustomer = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
 
     const [result] = await db.query(
@@ -521,6 +551,11 @@ export const createCustomer = async (req, res) => {
 
 export const updateCustomer = async (req, res) => {
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
     const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
 
@@ -549,12 +584,16 @@ export const deleteCustomer = async (req, res) => {
   let connection;
 
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    // 🔥 ปิด customer
     const [result] = await connection.query(
       `UPDATE mm_customers SET is_active = 0 WHERE id = ?`,
       [id],
@@ -569,7 +608,6 @@ export const deleteCustomer = async (req, res) => {
       });
     }
 
-    // 🔥 ปิด user ของ customer นี้ทั้งหมด
     await connection.query(
       `UPDATE um_users SET is_active = 0 WHERE customer_id = ?`,
       [id],
@@ -591,15 +629,18 @@ export const deleteCustomerHard = async (req, res) => {
   let connection;
 
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { id } = req.params;
 
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    // 🔥 ลบ user ของ customer ก่อน (กัน FK / orphan)
     await connection.query(`DELETE FROM um_users WHERE customer_id = ?`, [id]);
 
-    // 🔥 ลบ customer จริง
     const [result] = await connection.query(
       `DELETE FROM mm_customers WHERE id = ?`,
       [id],
@@ -630,6 +671,11 @@ export const createCustomerUser = async (req, res) => {
   let connection;
 
   try {
+    // 🔥 รองรับ token
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
     const { username, password, first_name, last_name, customer_id } = req.body;
 
     if (!username || !password || !customer_id) {
@@ -641,7 +687,6 @@ export const createCustomerUser = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    // 🔥 check username ซ้ำ
     const [exists] = await connection.query(
       `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
       [username],
@@ -658,7 +703,6 @@ export const createCustomerUser = async (req, res) => {
 
     const CUSTOMER_ROLE = 2;
 
-    // 🔥 insert (ไม่มี warehouse / license)
     const [result] = await connection.query(
       `
       INSERT INTO um_users (

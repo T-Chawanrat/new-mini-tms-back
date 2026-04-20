@@ -1,6 +1,6 @@
-// routes/import.routes.js
-
 import express from "express";
+import { auth } from "../middlewares/auth.js";
+
 import {
   importSTD,
   importVGT,
@@ -9,8 +9,8 @@ import {
 
 const router = express.Router();
 
-router.post("/std", importSTD);
-router.post("/vgt", importVGT);
-router.post("/adv", importADV);
+router.post("/std", auth, importSTD);
+router.post("/vgt", auth, importVGT);
+router.post("/adv", auth, importADV);
 
 export default router;

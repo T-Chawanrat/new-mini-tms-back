@@ -222,10 +222,25 @@ export const updateUser = async (req, res) => {
 
     const { id } = req.params;
 
-    const { first_name, last_name, license_expire } = req.body;
+    const { first_name, last_name, license_no, license_expire, is_active } =
+      req.body;
 
     if (!id) {
       return res.status(400).json({ message: "id required" });
+    }
+
+    // เปลี่ยนสถานะ Active / Inactive
+    if (is_active !== undefined) {
+      await db.query(
+        `
+        UPDATE um_users
+        SET is_active = ?
+        WHERE id = ?
+        `,
+        [is_active, id],
+      );
+
+      return res.json({ message: "update status success" });
     }
 
     await db.query(
@@ -233,34 +248,20 @@ export const updateUser = async (req, res) => {
       UPDATE um_users SET
         first_name = ?,
         last_name = ?,
+        license_no = ?,
         license_expire = ?
       WHERE id = ?
-    `,
-      [first_name || null, last_name || null, license_expire || null, id],
+      `,
+      [
+        first_name || null,
+        last_name || null,
+        license_no || null,
+        license_expire || null,
+        id,
+      ],
     );
 
     res.json({ message: "update success" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const deleteUser = async (req, res) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const { id } = req.params;
-
-    await db.query(
-      `
-      UPDATE um_users SET is_active = 0 WHERE id = ?
-    `,
-      [id],
-    );
-
-    res.json({ message: "delete success" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -314,12 +315,11 @@ export const deleteUserHard = async (req, res) => {
 
 export const getVehicles = async (req, res) => {
   try {
-    // 🔥 รองรับ token
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { search, vehicle_type, usage_type, status } = req.query;
+    const { search, vehicle_type, status } = req.query;
 
     let sql = `
       SELECT *
@@ -329,7 +329,6 @@ export const getVehicles = async (req, res) => {
 
     const params = [];
 
-    // 🔥 SEARCH (ใช้ util)
     if (search) {
       sql += `
         AND (
@@ -340,15 +339,9 @@ export const getVehicles = async (req, res) => {
       `;
     }
 
-    // 🔥 FILTER
     if (vehicle_type) {
       sql += ` AND vehicle_type = ?`;
       params.push(vehicle_type);
-    }
-
-    if (usage_type) {
-      sql += ` AND usage_type = ?`;
-      params.push(usage_type);
     }
 
     if (status) {
@@ -368,7 +361,6 @@ export const getVehicles = async (req, res) => {
 
 export const createVehicle = async (req, res) => {
   try {
-    // 🔥 รองรับ token
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -378,7 +370,6 @@ export const createVehicle = async (req, res) => {
       brand,
       model,
       vehicle_type,
-      usage_type,
       capacity_kg,
       warehouse_id,
       status,
@@ -404,6 +395,7 @@ export const createVehicle = async (req, res) => {
     if (capacity_kg === undefined || capacity_kg === "") {
       return res.status(400).json({ message: "capacity required" });
     }
+
     if (isNaN(Number(capacity_kg))) {
       return res.status(400).json({ message: "capacity must be number" });
     }
@@ -416,17 +408,21 @@ export const createVehicle = async (req, res) => {
     const [result] = await db.query(
       `
       INSERT INTO mm_vehicles (
-        license_plate, brand, model, vehicle_type,
-        usage_type, capacity_kg, warehouse_id, status
+        license_plate,
+        brand,
+        model,
+        vehicle_type,
+        capacity_kg,
+        warehouse_id,
+        status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `,
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
       [
         plate,
         brand || null,
         model || null,
         vehicle_type || null,
-        usage_type || null,
         Number(capacity_kg),
         warehouse_id || null,
         status,
@@ -733,6 +729,685 @@ export const createCustomerUser = async (req, res) => {
     if (connection) await connection.rollback();
     if (connection) connection.release();
 
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* ================= SHIPPERS ================= */
+export const getShippers = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const customerIdParam = req.params.customer_id;
+    const { customer_id, search } = req.query;
+
+    let sql = `
+      SELECT
+        s.shipper_id,
+        s.shipper_code,
+        s.shipper_type_id,
+        s.shipper_name,
+        s.address,
+
+        s.subdistrict_id,
+        s.district_id,
+        s.province_id,
+        s.zip_code,
+
+        a.subdistrict_name,
+        a.district_name,
+        a.province_name,
+
+        s.tel,
+        s.fax,
+        s.customer_id,
+        c.code AS customer_code,
+        c.name AS customer_name,
+        s.is_deleted
+
+      FROM mm_shippers s
+      LEFT JOIN mm_customers c 
+        ON c.id = s.customer_id
+
+      LEFT JOIN mm_master_addresses a
+        ON a.subdistrict_id = s.subdistrict_id
+        AND a.district_id = s.district_id
+        AND a.province_id = s.province_id
+
+      WHERE s.is_deleted = 'N'
+    `;
+
+    const params = [];
+
+    // CUSTOMER เห็นเฉพาะของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      sql += ` AND s.customer_id = ?`;
+      params.push(req.user.customer_id);
+    } else if (customerIdParam) {
+      sql += ` AND s.customer_id = ?`;
+      params.push(customerIdParam);
+    } else if (customer_id) {
+      sql += ` AND s.customer_id = ?`;
+      params.push(customer_id);
+    }
+
+    if (search) {
+      sql += `
+        AND (
+          ${buildLike("s.shipper_code", search)}
+          OR ${buildLike("s.shipper_name", search)}
+          OR ${buildLike("s.tel", search)}
+          OR ${buildLike("s.zip_code", search)}
+          OR ${buildLike("a.subdistrict_name", search)}
+          OR ${buildLike("a.district_name", search)}
+          OR ${buildLike("a.province_name", search)}
+          OR ${buildLike("c.code", search)}
+          OR ${buildLike("c.name", search)}
+        )
+      `;
+    }
+
+    sql += ` ORDER BY s.shipper_id DESC`;
+
+    const [rows] = await db.query(sql, params);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("GET SHIPPERS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const createShipper = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id } = req.params;
+
+    const {
+      shipper_code,
+      shipper_type_id,
+      shipper_name,
+      address,
+      subdistrict_id,
+      district_id,
+      province_id,
+      zip_code,
+      tel,
+      fax,
+    } = req.body;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id required" });
+    }
+
+    // CUSTOMER สร้างได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res
+          .status(403)
+          .json({ message: "customer user has no customer_id" });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    if (!shipper_code || !shipper_name) {
+      return res.status(400).json({
+        message: "shipper_code / shipper_name required",
+      });
+    }
+
+    const [customerRows] = await db.query(
+      `
+      SELECT id
+      FROM mm_customers
+      WHERE id = ?
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [customer_id],
+    );
+
+    if (customerRows.length === 0) {
+      return res.status(400).json({
+        message: "customer not found or inactive",
+      });
+    }
+
+    const [exists] = await db.query(
+      `
+      SELECT shipper_id
+      FROM mm_shippers
+      WHERE customer_id = ?
+        AND shipper_code = ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [customer_id, shipper_code],
+    );
+
+    if (exists.length > 0) {
+      return res.status(400).json({
+        message: "shipper_code นี้มีใน customer นี้แล้ว",
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      INSERT INTO mm_shippers (
+        shipper_code,
+        shipper_type_id,
+        shipper_name,
+        address,
+        subdistrict_id,
+        district_id,
+        province_id,
+        zip_code,
+        tel,
+        fax,
+        customer_id,
+        is_deleted
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'N')
+      `,
+      [
+        shipper_code,
+        shipper_type_id || null,
+        shipper_name,
+        address || null,
+        subdistrict_id || null,
+        district_id || null,
+        province_id || null,
+        zip_code || null,
+        tel || null,
+        fax || null,
+        customer_id,
+      ],
+    );
+
+    res.json({
+      message: "create shipper success",
+      id: result.insertId,
+    });
+  } catch (err) {
+    console.error("CREATE SHIPPER ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const updateShipper = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id, id } = req.params;
+
+    const {
+      shipper_code,
+      shipper_type_id,
+      shipper_name,
+      address,
+      subdistrict_id,
+      district_id,
+      province_id,
+      zip_code,
+      tel,
+      fax,
+      longitude,
+      latitude,
+      priority,
+    } = req.body;
+
+    if (!customer_id || !id) {
+      return res.status(400).json({ message: "customer_id / id required" });
+    }
+
+    // CUSTOMER แก้ได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    if (!shipper_code || !shipper_name) {
+      return res.status(400).json({
+        message: "shipper_code / shipper_name required",
+      });
+    }
+
+    const [exists] = await db.query(
+      `
+      SELECT shipper_id
+      FROM mm_shippers
+      WHERE customer_id = ?
+        AND shipper_code = ?
+        AND shipper_id <> ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [customer_id, shipper_code, id],
+    );
+
+    if (exists.length > 0) {
+      return res.status(400).json({
+        message: "shipper_code นี้มีใน customer นี้แล้ว",
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE mm_shippers SET
+        shipper_code = ?,
+        shipper_type_id = ?,
+        shipper_name = ?,
+        address = ?,
+        subdistrict_id = ?,
+        district_id = ?,
+        province_id = ?,
+        zip_code = ?,
+        tel = ?,
+        fax = ?,
+        longitude = ?,
+        latitude = ?,
+        priority = ?
+      WHERE shipper_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      `,
+      [
+        shipper_code,
+        shipper_type_id || null,
+        shipper_name,
+        address || null,
+        subdistrict_id || null,
+        district_id || null,
+        province_id || null,
+        zip_code || null,
+        tel || null,
+        fax || null,
+        longitude || null,
+        latitude || null,
+        priority || 0,
+        id,
+        customer_id,
+      ],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "shipper not found" });
+    }
+
+    res.json({ message: "update shipper success" });
+  } catch (err) {
+    console.error("UPDATE SHIPPER ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteShipper = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id, id } = req.params;
+
+    // CUSTOMER ลบได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE mm_shippers
+      SET is_deleted = 'Y'
+      WHERE shipper_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      `,
+      [id, customer_id],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "shipper not found" });
+    }
+
+    res.json({ message: "delete shipper success" });
+  } catch (err) {
+    console.error("DELETE SHIPPER ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* ================= RECIPIENTS ================= */
+
+export const getRecipients = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id } = req.params;
+    const { search } = req.query;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id required" });
+    }
+
+    // CUSTOMER เห็นได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    let sql = `
+      SELECT
+        r.recipient_id,
+        r.recipient_code,
+        r.recipient_type_id,
+        r.recipient_name,
+        r.customer_id,
+        c.code AS customer_code,
+        c.name AS customer_name,
+        r.is_deleted
+      FROM mm_recipients r
+      LEFT JOIN mm_customers c ON c.id = r.customer_id
+      WHERE r.customer_id = ?
+        AND r.is_deleted = 'N'
+    `;
+
+    const params = [customer_id];
+
+    if (search) {
+      sql += `
+        AND (
+          ${buildLike("r.recipient_code", search)}
+          OR ${buildLike("r.recipient_name", search)}
+        )
+      `;
+    }
+
+    sql += ` ORDER BY r.recipient_id DESC`;
+
+    const [rows] = await db.query(sql, params);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("GET RECIPIENTS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const createRecipient = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id } = req.params;
+
+    const { recipient_code, recipient_type_id, recipient_name } = req.body;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id required" });
+    }
+
+    // CUSTOMER สร้างได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    if (!recipient_code || !recipient_name) {
+      return res.status(400).json({
+        message: "recipient_code / recipient_name required",
+      });
+    }
+
+    const [customerRows] = await db.query(
+      `
+      SELECT id
+      FROM mm_customers
+      WHERE id = ?
+        AND is_active = 1
+      LIMIT 1
+      `,
+      [customer_id],
+    );
+
+    if (customerRows.length === 0) {
+      return res.status(400).json({
+        message: "customer not found or inactive",
+      });
+    }
+
+    const [exists] = await db.query(
+      `
+      SELECT recipient_id
+      FROM mm_recipients
+      WHERE customer_id = ?
+        AND recipient_code = ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [customer_id, recipient_code],
+    );
+
+    if (exists.length > 0) {
+      return res.status(400).json({
+        message: "recipient_code นี้มีใน customer นี้แล้ว",
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      INSERT INTO mm_recipients (
+        recipient_code,
+        recipient_type_id,
+        recipient_name,
+        customer_id,
+        is_deleted
+      )
+      VALUES (?, ?, ?, ?, 'N')
+      `,
+      [recipient_code, recipient_type_id || null, recipient_name, customer_id],
+    );
+
+    res.json({
+      message: "create recipient success",
+      id: result.insertId,
+    });
+  } catch (err) {
+    console.error("CREATE RECIPIENT ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const updateRecipient = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id, id } = req.params;
+
+    const { recipient_code, recipient_type_id, recipient_name } = req.body;
+
+    if (!customer_id || !id) {
+      return res.status(400).json({ message: "customer_id / id required" });
+    }
+
+    // CUSTOMER แก้ได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    if (!recipient_code || !recipient_name) {
+      return res.status(400).json({
+        message: "recipient_code / recipient_name required",
+      });
+    }
+
+    const [exists] = await db.query(
+      `
+      SELECT recipient_id
+      FROM mm_recipients
+      WHERE customer_id = ?
+        AND recipient_code = ?
+        AND recipient_id <> ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [customer_id, recipient_code, id],
+    );
+
+    if (exists.length > 0) {
+      return res.status(400).json({
+        message: "recipient_code นี้มีใน customer นี้แล้ว",
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE mm_recipients SET
+        recipient_code = ?,
+        recipient_type_id = ?,
+        recipient_name = ?
+      WHERE recipient_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      `,
+      [
+        recipient_code,
+        recipient_type_id || null,
+        recipient_name,
+        id,
+        customer_id,
+      ],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "recipient not found" });
+    }
+
+    res.json({ message: "update recipient success" });
+  } catch (err) {
+    console.error("UPDATE RECIPIENT ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const deleteRecipient = async (req, res) => {
+  let connection;
+
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id, id } = req.params;
+
+    if (!customer_id || !id) {
+      return res.status(400).json({ message: "customer_id / id required" });
+    }
+
+    // CUSTOMER ลบได้เฉพาะ customer_id ของตัวเอง
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `
+      UPDATE mm_recipients
+      SET is_deleted = 'Y'
+      WHERE recipient_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      `,
+      [id, customer_id],
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      connection.release();
+
+      return res.status(404).json({ message: "recipient not found" });
+    }
+
+    await connection.query(
+      `
+      UPDATE mm_recipient_details
+      SET is_deleted = 'Y',
+          is_default = 0
+      WHERE recipient_id = ?
+      `,
+      [id],
+    );
+
+    await connection.commit();
+    connection.release();
+
+    res.json({ message: "delete recipient success" });
+  } catch (err) {
+    if (connection) await connection.rollback();
+    if (connection) connection.release();
+
+    console.error("DELETE RECIPIENT ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

@@ -41,7 +41,6 @@ export const login = async (req, res) => {
 
     const user = rows[0];
 
-    // ❌ ไม่ใช้ bcrypt แล้ว
     if (password !== user.password) {
       return res.status(401).json({
         message: "รหัสผ่านไม่ถูกต้อง",
@@ -89,6 +88,7 @@ export const login = async (req, res) => {
       {
         id: user.id,
         role_id: user.role_id,
+        customer_id: user.customer_id,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" },

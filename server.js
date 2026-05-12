@@ -14,6 +14,7 @@ import authRoute from "./routes/auth.routes.js";
 import manageRoutes from "./routes/manage.route.js";
 import shipmentsRoute from "./routes/shipments.routes.js";
 import importRoutes from "./routes/import.routes.js";
+import scanWarehouseRoutes from "./routes/scan.warehouse.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +42,7 @@ app.use("/", authRoute);
 app.use("/manage", manageRoutes);
 app.use("/shipments", shipmentsRoute);
 app.use("/import", importRoutes);
+app.use("/scan", scanWarehouseRoutes);
 
 
 app.get("/test", (req, res) => {

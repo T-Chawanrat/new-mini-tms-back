@@ -8,4 +8,6 @@ export const ROLES = {
   7: "DRIVER",
   8: "DC",
   9: "HR",
+  10: "IT",
+  11: "SUPERADMIN",
 };

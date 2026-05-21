@@ -11,7 +11,23 @@ export const getRoles = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("ROLES ERROR:", err);
+    console.error("roles error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getCustomers = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT id, name
+      FROM mm_customers
+      WHERE is_active = '1'
+      ORDER BY id ASC
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("customers error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -27,7 +43,7 @@ export const getWarehouses = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("WAREHOUSE ERROR:", err);
+    console.error("warehouses error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -42,7 +58,7 @@ export const getZones = async (req, res) => {
 
     res.json(rows);
   } catch (err) {
-    console.error("ZONE ERROR:", err);
+    console.error("zone error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -87,7 +103,25 @@ export const searchAddress = async (req, res) => {
       count: rows.length,
     });
   } catch (err) {
-    console.error("SEARCH ADDRESS ERROR:", err);
+    console.error("search address error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getRecipientTypes = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        name
+      FROM mm_recipient_types
+      WHERE is_deleted = 'N'
+      ORDER BY id ASC
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("GET RECIPIENT TYPES ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

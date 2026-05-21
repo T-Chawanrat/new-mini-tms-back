@@ -97,18 +97,7 @@ export const createUser = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const {
-      username,
-      password,
-      first_name,
-      last_name,
-      role_id,
-      customer_id,
-      warehouse_id,
-      license_no,
-      license_expire,
-      zones = [],
-    } = req.body;
+    const { username, password, first_name, last_name, role_id, customer_id, warehouse_id, license_no, license_expire, zones = [] } = req.body;
 
     const role = Number(role_id);
 
@@ -121,10 +110,7 @@ export const createUser = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    const [exists] = await connection.query(
-      `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
-      [username],
-    );
+    const [exists] = await connection.query(`SELECT id FROM um_users WHERE username = ? LIMIT 1`, [username]);
 
     if (exists.length > 0) {
       await connection.rollback();
@@ -192,10 +178,7 @@ export const createUser = async (req, res) => {
     if (role === 3 && zones.length > 0) {
       const values = zones.map((z) => [userId, z]);
 
-      await connection.query(
-        `INSERT INTO um_user_zones (user_id, zone_id) VALUES ?`,
-        [values],
-      );
+      await connection.query(`INSERT INTO um_user_zones (user_id, zone_id) VALUES ?`, [values]);
     }
 
     await connection.commit();
@@ -222,8 +205,7 @@ export const updateUser = async (req, res) => {
 
     const { id } = req.params;
 
-    const { first_name, last_name, license_no, license_expire, is_active } =
-      req.body;
+    const { first_name, last_name, license_no, license_expire, is_active } = req.body;
 
     if (!id) {
       return res.status(400).json({ message: "id required" });
@@ -252,13 +234,7 @@ export const updateUser = async (req, res) => {
         license_expire = ?
       WHERE id = ?
       `,
-      [
-        first_name || null,
-        last_name || null,
-        license_no || null,
-        license_expire || null,
-        id,
-      ],
+      [first_name || null, last_name || null, license_no || null, license_expire || null, id],
     );
 
     res.json({ message: "update success" });
@@ -281,14 +257,9 @@ export const deleteUserHard = async (req, res) => {
     await connection.beginTransaction();
 
     await connection.query(`DELETE FROM um_user_zones WHERE user_id = ?`, [id]);
-    await connection.query(`DELETE FROM um_user_vehicles WHERE user_id = ?`, [
-      id,
-    ]);
+    await connection.query(`DELETE FROM um_user_vehicles WHERE user_id = ?`, [id]);
 
-    const [result] = await connection.query(
-      `DELETE FROM um_users WHERE id = ?`,
-      [id],
-    );
+    const [result] = await connection.query(`DELETE FROM um_users WHERE id = ?`, [id]);
 
     if (result.affectedRows === 0) {
       await connection.rollback();
@@ -319,12 +290,50 @@ export const getVehicles = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { search, vehicle_type, status } = req.query;
+    const { search, vehicle_type_id, status, owner_type } = req.query;
 
     let sql = `
-      SELECT *
-      FROM mm_vehicles
-      WHERE 1=1
+      SELECT
+        v.id,
+        v.license_plate,
+        v.license_province,
+
+        v.brand_id,
+        b.name AS brand_name,
+
+        v.model,
+        v.color,
+        v.vehicle_year,
+
+        v.vehicle_type_id,
+        vt.name AS vehicle_type_name,
+
+        v.fuel_type,
+        v.capacity_kg,
+        v.max_load_kg,
+
+        v.warehouse_id,
+        w.name AS warehouse_name,
+
+        v.owner_type,
+        v.owner_name,
+        v.purchase_date,
+        v.fleet_card_no,
+        v.chassis_no,
+        v.engine_no,
+
+        v.status,
+        v.is_deleted,
+        v.created_at,
+        v.updated_at
+      FROM mm_vehicles v
+      LEFT JOIN mm_vehicle_brands b
+        ON b.id = v.brand_id
+      LEFT JOIN mm_vehicle_types vt
+        ON vt.id = v.vehicle_type_id
+      LEFT JOIN mm_warehouses w
+        ON w.id = v.warehouse_id
+      WHERE v.is_deleted = 'N'
     `;
 
     const params = [];
@@ -332,24 +341,37 @@ export const getVehicles = async (req, res) => {
     if (search) {
       sql += `
         AND (
-          ${buildLike("license_plate", search)}
-          OR ${buildLike("brand", search)}
-          OR ${buildLike("model", search)}
+          ${buildLike("v.license_plate", search)}
+          OR ${buildLike("v.license_province", search)}
+          OR ${buildLike("b.name", search)}
+          OR ${buildLike("v.model", search)}
+          OR ${buildLike("v.color", search)}
+          OR ${buildLike("vt.name", search)}
+          OR ${buildLike("v.owner_name", search)}
+          OR ${buildLike("v.fleet_card_no", search)}
+          OR ${buildLike("v.chassis_no", search)}
+          OR ${buildLike("v.engine_no", search)}
+          OR ${buildLike("w.name", search)}
         )
       `;
     }
 
-    if (vehicle_type) {
-      sql += ` AND vehicle_type = ?`;
-      params.push(vehicle_type);
+    if (vehicle_type_id) {
+      sql += ` AND v.vehicle_type_id = ?`;
+      params.push(vehicle_type_id);
     }
 
     if (status) {
-      sql += ` AND status = ?`;
+      sql += ` AND v.status = ?`;
       params.push(status);
     }
 
-    sql += ` ORDER BY id DESC`;
+    if (owner_type) {
+      sql += ` AND v.owner_type = ?`;
+      params.push(owner_type);
+    }
+
+    sql += ` ORDER BY v.id DESC`;
 
     const [rows] = await db.query(sql, params);
 
@@ -367,29 +389,42 @@ export const createVehicle = async (req, res) => {
 
     let {
       license_plate,
-      brand,
+      license_province,
+      brand_id,
       model,
-      vehicle_type,
+      color,
+      vehicle_year,
+      vehicle_type_id,
+      fuel_type,
       capacity_kg,
+      max_load_kg,
       warehouse_id,
-      status,
+      owner_type,
+      owner_name,
+      purchase_date,
+      fleet_card_no,
+      chassis_no,
+      engine_no,
     } = req.body;
 
     if (!license_plate) {
       return res.status(400).json({ message: "license_plate required" });
     }
 
-    const plate = license_plate
-      .toString()
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, "")
-      .replace(/-/g, "");
+    const plate = license_plate.toString().trim().toUpperCase().replace(/\s+/g, "").replace(/-/g, "");
 
     if (plate.length < 4) {
       return res.status(400).json({
         message: "ทะเบียนไม่ถูกต้อง",
       });
+    }
+
+    if (!brand_id) {
+      return res.status(400).json({ message: "brand_id required" });
+    }
+
+    if (!vehicle_type_id) {
+      return res.status(400).json({ message: "vehicle_type_id required" });
     }
 
     if (capacity_kg === undefined || capacity_kg === "") {
@@ -400,32 +435,71 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "capacity must be number" });
     }
 
-    const allowedStatus = ["ACTIVE", "MAINTENANCE", "INACTIVE"];
-    if (!allowedStatus.includes(status)) {
-      return res.status(400).json({ message: "invalid status" });
+    if (max_load_kg !== undefined && max_load_kg !== "" && isNaN(Number(max_load_kg))) {
+      return res.status(400).json({ message: "max_load_kg must be number" });
     }
+
+    if (vehicle_year !== undefined && vehicle_year !== "" && isNaN(Number(vehicle_year))) {
+      return res.status(400).json({ message: "vehicle_year must be number" });
+    }
+
+    const allowedOwnerType = ["COMPANY", "DRIVER"];
+    const finalOwnerType = owner_type || "COMPANY";
+
+    if (!allowedOwnerType.includes(finalOwnerType)) {
+      return res.status(400).json({ message: "invalid owner_type" });
+    }
+
+    const finalCapacityKg = Number(capacity_kg);
+    const finalMaxLoadKg = max_load_kg === undefined || max_load_kg === "" ? finalCapacityKg : Number(max_load_kg);
+
+    const finalStatus = "ACTIVE";
 
     const [result] = await db.query(
       `
       INSERT INTO mm_vehicles (
         license_plate,
-        brand,
+        license_province,
+        brand_id,
         model,
-        vehicle_type,
+        color,
+        vehicle_year,
+        vehicle_type_id,
+        fuel_type,
         capacity_kg,
+        max_load_kg,
         warehouse_id,
-        status
+        owner_type,
+        owner_name,
+        purchase_date,
+        fleet_card_no,
+        chassis_no,
+        engine_no,
+        status,
+        is_deleted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         plate,
-        brand || null,
+        license_province || null,
+        brand_id || null,
         model || null,
-        vehicle_type || null,
-        Number(capacity_kg),
+        color || null,
+        vehicle_year === undefined || vehicle_year === "" ? null : Number(vehicle_year),
+        vehicle_type_id || null,
+        fuel_type || null,
+        finalCapacityKg,
+        finalMaxLoadKg,
         warehouse_id || null,
-        status,
+        finalOwnerType,
+        owner_name || null,
+        purchase_date || null,
+        fleet_card_no || null,
+        chassis_no || null,
+        engine_no || null,
+        finalStatus,
+        "N",
       ],
     );
 
@@ -433,7 +507,13 @@ export const createVehicle = async (req, res) => {
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(400).json({
-        message: "ทะเบียนนี้มีในระบบแล้ว",
+        message: "ข้อมูลรถซ้ำในระบบ",
+      });
+    }
+
+    if (err.code === "ER_NO_REFERENCED_ROW_2") {
+      return res.status(400).json({
+        message: "brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
       });
     }
 
@@ -443,7 +523,6 @@ export const createVehicle = async (req, res) => {
 
 export const updateVehicle = async (req, res) => {
   try {
-    // 🔥 รองรับ token
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -451,10 +530,25 @@ export const updateVehicle = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    await db.query(`UPDATE mm_vehicles SET status = ? WHERE id = ?`, [
-      status,
-      id,
-    ]);
+    const allowedStatus = ["ACTIVE", "MAINTENANCE", "INACTIVE"];
+
+    if (!allowedStatus.includes(status)) {
+      return res.status(400).json({ message: "invalid status" });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE mm_vehicles
+      SET status = ?
+      WHERE id = ?
+        AND is_deleted = 'N'
+      `,
+      [status, id],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "vehicle not found" });
+    }
 
     res.json({ message: "update success" });
   } catch (err) {
@@ -464,56 +558,26 @@ export const updateVehicle = async (req, res) => {
 
 export const deleteVehicle = async (req, res) => {
   try {
-    // 🔥 รองรับ token
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
 
     const { id } = req.params;
 
-    const [result] = await db.query(`DELETE FROM mm_vehicles WHERE id = ?`, [
-      id,
-    ]);
+    const [result] = await db.query(
+      `
+      UPDATE mm_vehicles
+      SET is_deleted = 'Y'
+      WHERE id = ?
+      `,
+      [id],
+    );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "vehicle not found" });
     }
 
     res.json({ message: "delete success" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const getCustomers = async (req, res) => {
-  try {
-    // 🔥 รองรับ token
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const { search } = req.query;
-
-    let sql = `
-      SELECT *
-      FROM mm_customers
-      WHERE 1=1
-    `;
-
-    if (search) {
-      sql += `
-        AND (
-          ${buildLike("name", search)}
-          OR ${buildLike("code", search)}
-        )
-      `;
-    }
-
-    sql += ` ORDER BY id DESC`;
-
-    const [rows] = await db.query(sql);
-
-    res.json(rows);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -528,15 +592,50 @@ export const createCustomer = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
+    const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
+      req.body;
+
+    const customerType = type || "EXPRESS";
 
     const [result] = await db.query(
       `
       INSERT INTO mm_customers
-      (code, name, import_type, tax_id, address, contact_name, contact_tel, is_active)
-      VALUES (?, ?, 'STD', ?, ?, ?, ?, 1)
+      (
+        code,
+        name,
+        address,
+        subdistrict_id,
+        district_id,
+        province_id,
+        zip_code,
+        tel,
+        is_active,
+        line,
+        contact_name,
+        contact_tel,
+        email,
+        type,
+        tax_id,
+        import_type
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'STD')
     `,
-      [code, name, tax_id, address, contact_name, contact_tel],
+      [
+        code,
+        name,
+        address,
+        subdistrict_id || null,
+        district_id || null,
+        province_id || null,
+        zip_code || null,
+        tel || null,
+        line || null,
+        contact_name,
+        contact_tel,
+        email || null,
+        customerType,
+        tax_id,
+      ],
     );
 
     res.json({ message: "create success", id: result.insertId });
@@ -553,24 +652,82 @@ export const updateCustomer = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { code, name, tax_id, address, contact_name, contact_tel } = req.body;
+
+    const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
+      req.body;
+
+    const customerType = type || "EXPRESS";
 
     await db.query(
       `
       UPDATE mm_customers SET
         code = ?,
         name = ?,
-        import_type = 'STD',
-        tax_id = ?,
         address = ?,
+        subdistrict_id = ?,
+        district_id = ?,
+        province_id = ?,
+        zip_code = ?,
+        tel = ?,
+        line = ?,
         contact_name = ?,
-        contact_tel = ?
+        contact_tel = ?,
+        email = ?,
+        type = ?,
+        import_type = 'STD',
+        tax_id = ?
       WHERE id = ?
     `,
-      [code, name, tax_id, address, contact_name, contact_tel, id],
+      [
+        code,
+        name,
+        address,
+        subdistrict_id || null,
+        district_id || null,
+        province_id || null,
+        zip_code || null,
+        tel || null,
+        line || null,
+        contact_name,
+        contact_tel,
+        email || null,
+        customerType,
+        tax_id,
+        id,
+      ],
     );
 
     res.json({ message: "update success" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const updateCustomerStatus = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    if (![0, 1, "0", "1", true, false].includes(is_active)) {
+      return res.status(400).json({ message: "invalid status" });
+    }
+
+    const activeValue = Number(is_active) === 1 || is_active === true ? 1 : 0;
+
+    await db.query(
+      `
+      UPDATE mm_customers
+      SET is_active = ?
+      WHERE id = ?
+      `,
+      [activeValue, id],
+    );
+
+    res.json({ message: "update status success" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -590,10 +747,7 @@ export const deleteCustomer = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    const [result] = await connection.query(
-      `UPDATE mm_customers SET is_active = 0 WHERE id = ?`,
-      [id],
-    );
+    const [result] = await connection.query(`UPDATE mm_customers SET is_active = 0 WHERE id = ?`, [id]);
 
     if (result.affectedRows === 0) {
       await connection.rollback();
@@ -604,10 +758,7 @@ export const deleteCustomer = async (req, res) => {
       });
     }
 
-    await connection.query(
-      `UPDATE um_users SET is_active = 0 WHERE customer_id = ?`,
-      [id],
-    );
+    await connection.query(`UPDATE um_users SET is_active = 0 WHERE customer_id = ?`, [id]);
 
     await connection.commit();
     connection.release();
@@ -637,10 +788,7 @@ export const deleteCustomerHard = async (req, res) => {
 
     await connection.query(`DELETE FROM um_users WHERE customer_id = ?`, [id]);
 
-    const [result] = await connection.query(
-      `DELETE FROM mm_customers WHERE id = ?`,
-      [id],
-    );
+    const [result] = await connection.query(`DELETE FROM mm_customers WHERE id = ?`, [id]);
 
     if (result.affectedRows === 0) {
       await connection.rollback();
@@ -683,10 +831,7 @@ export const createCustomerUser = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    const [exists] = await connection.query(
-      `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
-      [username],
-    );
+    const [exists] = await connection.query(`SELECT id FROM um_users WHERE username = ? LIMIT 1`, [username]);
 
     if (exists.length > 0) {
       await connection.rollback();
@@ -708,14 +853,7 @@ export const createCustomerUser = async (req, res) => {
       )
       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 1)
       `,
-      [
-        username,
-        password,
-        first_name || null,
-        last_name || null,
-        CUSTOMER_ROLE,
-        customer_id,
-      ],
+      [username, password, first_name || null, last_name || null, CUSTOMER_ROLE, customer_id],
     );
 
     await connection.commit();
@@ -748,6 +886,7 @@ export const getShippers = async (req, res) => {
         s.shipper_id,
         s.shipper_code,
         s.shipper_type_id,
+        st.name AS shipper_type_name,
         s.shipper_name,
         s.address,
 
@@ -768,6 +907,10 @@ export const getShippers = async (req, res) => {
         s.is_deleted
 
       FROM mm_shippers s
+
+      LEFT JOIN mm_shipper_types st
+        ON st.id = s.shipper_type_id
+
       LEFT JOIN mm_customers c 
         ON c.id = s.customer_id
 
@@ -776,12 +919,11 @@ export const getShippers = async (req, res) => {
         AND a.district_id = s.district_id
         AND a.province_id = s.province_id
 
-      WHERE s.is_deleted = 'N'
+      WHERE 1=1
     `;
 
     const params = [];
 
-    // CUSTOMER เห็นเฉพาะของตัวเอง
     if (Number(req.user.role_id) === 2) {
       sql += ` AND s.customer_id = ?`;
       params.push(req.user.customer_id);
@@ -805,6 +947,7 @@ export const getShippers = async (req, res) => {
           OR ${buildLike("a.province_name", search)}
           OR ${buildLike("c.code", search)}
           OR ${buildLike("c.name", search)}
+          OR ${buildLike("st.name", search)}
         )
       `;
     }
@@ -828,18 +971,7 @@ export const createShipper = async (req, res) => {
 
     const { customer_id } = req.params;
 
-    const {
-      shipper_code,
-      shipper_type_id,
-      shipper_name,
-      address,
-      subdistrict_id,
-      district_id,
-      province_id,
-      zip_code,
-      tel,
-      fax,
-    } = req.body;
+    const { shipper_code, shipper_type_id, shipper_name, address, subdistrict_id, district_id, province_id, zip_code, tel, fax } = req.body;
 
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id required" });
@@ -848,9 +980,7 @@ export const createShipper = async (req, res) => {
     // CUSTOMER สร้างได้เฉพาะ customer_id ของตัวเอง
     if (Number(req.user.role_id) === 2) {
       if (!req.user.customer_id) {
-        return res
-          .status(403)
-          .json({ message: "customer user has no customer_id" });
+        return res.status(403).json({ message: "customer user has no customer_id" });
       }
 
       if (String(customer_id) !== String(req.user.customer_id)) {
@@ -1058,45 +1188,31 @@ export const updateShipper = async (req, res) => {
   }
 };
 
-export const deleteShipper = async (req, res) => {
+export const updateShipperStatus = async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { customer_id, id } = req.params;
+    const { customerId, shipperId } = req.params;
+    const { is_deleted } = req.body;
 
-    // CUSTOMER ลบได้เฉพาะ customer_id ของตัวเอง
-    if (Number(req.user.role_id) === 2) {
-      if (!req.user.customer_id) {
-        return res.status(403).json({
-          message: "customer user has no customer_id",
-        });
-      }
-
-      if (String(customer_id) !== String(req.user.customer_id)) {
-        return res.status(403).json({ message: "forbidden" });
-      }
+    if (!["N", "Y"].includes(is_deleted)) {
+      return res.status(400).json({ message: "invalid status" });
     }
 
-    const [result] = await db.query(
+    await db.query(
       `
       UPDATE mm_shippers
-      SET is_deleted = 'Y'
+      SET is_deleted = ?
       WHERE shipper_id = ?
         AND customer_id = ?
-        AND is_deleted = 'N'
       `,
-      [id, customer_id],
+      [is_deleted, shipperId, customerId],
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "shipper not found" });
-    }
-
-    res.json({ message: "delete shipper success" });
+    res.json({ message: "update status success" });
   } catch (err) {
-    console.error("DELETE SHIPPER ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -1112,21 +1228,16 @@ export const getRecipients = async (req, res) => {
     const { customer_id } = req.params;
     const { search } = req.query;
 
-    if (!customer_id) {
-      return res.status(400).json({ message: "customer_id required" });
+    const isCustomer = Number(req.user.role_id) === 2;
+
+    if (isCustomer && !req.user.customer_id) {
+      return res.status(403).json({
+        message: "customer user has no customer_id",
+      });
     }
 
-    // CUSTOMER เห็นได้เฉพาะ customer_id ของตัวเอง
-    if (Number(req.user.role_id) === 2) {
-      if (!req.user.customer_id) {
-        return res.status(403).json({
-          message: "customer user has no customer_id",
-        });
-      }
-
-      if (String(customer_id) !== String(req.user.customer_id)) {
-        return res.status(403).json({ message: "forbidden" });
-      }
+    if (!isCustomer && !customer_id) {
+      return res.json([]);
     }
 
     let sql = `
@@ -1134,29 +1245,106 @@ export const getRecipients = async (req, res) => {
         r.recipient_id,
         r.recipient_code,
         r.recipient_type_id,
+        rt.name AS recipient_type_name,
         r.recipient_name,
-        r.customer_id,
+        r.customer_id AS recipient_customer_id,
+        r.is_deleted AS recipient_is_deleted,
+
+        c.id AS customer_id,
         c.code AS customer_code,
         c.name AS customer_name,
-        r.is_deleted
+
+        rd.recipient_detail_id,
+        rd.recipient_detail_name,
+        rd.address,
+        rd.subdistrict_id,
+        rd.district_id,
+        rd.province_id,
+        rd.zip_code,
+        rd.tel1,
+        rd.tel1_ext,
+        rd.tel2,
+        rd.tel2_ext,
+        rd.is_deleted AS detail_is_deleted,
+        rd.line_id,
+        rd.longitude,
+        rd.latitude,
+
+        a.subdistrict_name,
+        a.district_name,
+        a.province_name,
+
+        COUNT(
+          CASE 
+            WHEN rd.recipient_detail_id IS NOT NULL 
+            THEN 1 
+          END
+        ) OVER (
+          PARTITION BY r.recipient_id
+        ) AS address_count
+
       FROM mm_recipients r
-      LEFT JOIN mm_customers c ON c.id = r.customer_id
-      WHERE r.customer_id = ?
+
+      LEFT JOIN mm_customers c
+        ON c.id = r.customer_id
+
+      LEFT JOIN mm_recipient_types rt
+        ON rt.id = r.recipient_type_id
+        AND rt.is_deleted = 'N'
+
+      LEFT JOIN mm_recipient_details rd
+        ON rd.recipient_id = r.recipient_id
+
+      LEFT JOIN mm_master_addresses a
+        ON a.subdistrict_id = rd.subdistrict_id
+        AND a.district_id = rd.district_id
+        AND a.province_id = rd.province_id
+
+      WHERE 1 = 1
         AND r.is_deleted = 'N'
     `;
 
-    const params = [customer_id];
+    const params = [];
+
+    if (isCustomer) {
+      sql += ` AND r.customer_id = ? `;
+      params.push(req.user.customer_id);
+    }
+
+    if (!isCustomer && customer_id) {
+      sql += ` AND r.customer_id = ? `;
+      params.push(customer_id);
+    }
 
     if (search) {
       sql += `
         AND (
           ${buildLike("r.recipient_code", search)}
           OR ${buildLike("r.recipient_name", search)}
+          OR ${buildLike("rt.name", search)}
+          OR ${buildLike("rd.recipient_detail_name", search)}
+          OR ${buildLike("rd.address", search)}
+          OR ${buildLike("rd.tel1", search)}
+          OR ${buildLike("rd.tel2", search)}
+          OR ${buildLike("rd.zip_code", search)}
+          OR ${buildLike("rd.line_id", search)}
+          OR ${buildLike("a.subdistrict_name", search)}
+          OR ${buildLike("a.district_name", search)}
+          OR ${buildLike("a.province_name", search)}
+          OR ${buildLike("c.code", search)}
+          OR ${buildLike("c.name", search)}
         )
       `;
     }
 
-    sql += ` ORDER BY r.recipient_id DESC`;
+    sql += `
+      ORDER BY
+        r.recipient_id DESC,
+        CASE WHEN rd.is_deleted = 'N' THEN 0 ELSE 1 END,
+        rd.recipient_detail_id ASC
+
+      LIMIT 1000
+    `;
 
     const [rows] = await db.query(sql, params);
 
@@ -1181,7 +1369,6 @@ export const createRecipient = async (req, res) => {
       return res.status(400).json({ message: "customer_id required" });
     }
 
-    // CUSTOMER สร้างได้เฉพาะ customer_id ของตัวเอง
     if (Number(req.user.role_id) === 2) {
       if (!req.user.customer_id) {
         return res.status(403).json({
@@ -1251,10 +1438,132 @@ export const createRecipient = async (req, res) => {
 
     res.json({
       message: "create recipient success",
-      id: result.insertId,
+      recipient_id: result.insertId,
     });
   } catch (err) {
     console.error("CREATE RECIPIENT ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const createRecipientDetail = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customer_id, id } = req.params;
+
+    const {
+      recipient_detail_name,
+      address,
+      subdistrict_id,
+      district_id,
+      province_id,
+      zip_code,
+      tel1,
+      tel1_ext,
+      tel2,
+      tel2_ext,
+      line_id,
+      longitude,
+      latitude,
+    } = req.body;
+
+    if (!customer_id || !id) {
+      return res.status(400).json({
+        message: "customer_id / recipient_id required",
+      });
+    }
+
+    if (Number(req.user.role_id) === 2) {
+      if (!req.user.customer_id) {
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
+      }
+
+      if (String(customer_id) !== String(req.user.customer_id)) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+    }
+
+    if (!recipient_detail_name || !address || !tel1) {
+      return res.status(400).json({
+        message: "recipient_detail_name / address / tel1 required",
+      });
+    }
+
+    if (!subdistrict_id || !district_id || !province_id) {
+      return res.status(400).json({
+        message: "subdistrict_id / district_id / province_id required",
+      });
+    }
+
+    const [recipientRows] = await db.query(
+      `
+      SELECT recipient_id
+      FROM mm_recipients
+      WHERE recipient_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [id, customer_id],
+    );
+
+    if (recipientRows.length === 0) {
+      return res.status(404).json({
+        message: "recipient not found",
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      INSERT INTO mm_recipient_details (
+        recipient_id,
+        recipient_detail_name,
+        address,
+        subdistrict_id,
+        district_id,
+        province_id,
+        zip_code,
+        tel1,
+        tel1_ext,
+        tel2,
+        tel2_ext,
+        is_deleted,
+        is_default,
+        line_id,
+        longitude,
+        latitude
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'N', 'N', ?, ?, ?)
+      `,
+      [
+        id,
+        recipient_detail_name,
+        address,
+        subdistrict_id || null,
+        district_id || null,
+        province_id || null,
+        zip_code || null,
+        tel1,
+        tel1_ext || null,
+        tel2 || null,
+        tel2_ext || null,
+        line_id || null,
+        longitude || null,
+        latitude || null,
+      ],
+    );
+
+    res.json({
+      message: "create recipient detail success",
+      recipient_detail_id: result.insertId,
+    });
+  } catch (err) {
+    console.error("CREATE RECIPIENT DETAIL ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -1267,13 +1576,12 @@ export const updateRecipient = async (req, res) => {
 
     const { customer_id, id } = req.params;
 
-    const { recipient_code, recipient_type_id, recipient_name } = req.body;
+    const { mode = "recipient", recipient_code, recipient_type_id, recipient_name, detail = {} } = req.body;
 
     if (!customer_id || !id) {
       return res.status(400).json({ message: "customer_id / id required" });
     }
 
-    // CUSTOMER แก้ได้เฉพาะ customer_id ของตัวเอง
     if (Number(req.user.role_id) === 2) {
       if (!req.user.customer_id) {
         return res.status(403).json({
@@ -1286,76 +1594,179 @@ export const updateRecipient = async (req, res) => {
       }
     }
 
-    if (!recipient_code || !recipient_name) {
-      return res.status(400).json({
-        message: "recipient_code / recipient_name required",
-      });
-    }
-
-    const [exists] = await db.query(
+    const [recipientRows] = await db.query(
       `
       SELECT recipient_id
       FROM mm_recipients
-      WHERE customer_id = ?
-        AND recipient_code = ?
-        AND recipient_id <> ?
-        AND is_deleted = 'N'
-      LIMIT 1
-      `,
-      [customer_id, recipient_code, id],
-    );
-
-    if (exists.length > 0) {
-      return res.status(400).json({
-        message: "recipient_code นี้มีใน customer นี้แล้ว",
-      });
-    }
-
-    const [result] = await db.query(
-      `
-      UPDATE mm_recipients SET
-        recipient_code = ?,
-        recipient_type_id = ?,
-        recipient_name = ?
       WHERE recipient_id = ?
         AND customer_id = ?
         AND is_deleted = 'N'
+      LIMIT 1
       `,
-      [
-        recipient_code,
-        recipient_type_id || null,
-        recipient_name,
-        id,
-        customer_id,
-      ],
+      [id, customer_id],
     );
 
-    if (result.affectedRows === 0) {
+    if (recipientRows.length === 0) {
       return res.status(404).json({ message: "recipient not found" });
     }
 
-    res.json({ message: "update recipient success" });
+    if (mode === "recipient") {
+      if (!recipient_code || !recipient_name) {
+        return res.status(400).json({
+          message: "recipient_code / recipient_name required",
+        });
+      }
+
+      const [exists] = await db.query(
+        `
+        SELECT recipient_id
+        FROM mm_recipients
+        WHERE customer_id = ?
+          AND recipient_code = ?
+          AND recipient_id <> ?
+          AND is_deleted = 'N'
+        LIMIT 1
+        `,
+        [customer_id, recipient_code, id],
+      );
+
+      if (exists.length > 0) {
+        return res.status(400).json({
+          message: "recipient_code นี้มีใน customer นี้แล้ว",
+        });
+      }
+
+      const [result] = await db.query(
+        `
+        UPDATE mm_recipients SET
+          recipient_code = ?,
+          recipient_type_id = ?,
+          recipient_name = ?
+        WHERE recipient_id = ?
+          AND customer_id = ?
+          AND is_deleted = 'N'
+        `,
+        [recipient_code, recipient_type_id || null, recipient_name, id, customer_id],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: "recipient not found" });
+      }
+
+      return res.json({ message: "update recipient success" });
+    }
+
+    if (mode === "detail") {
+      const {
+        recipient_detail_id,
+        recipient_detail_name,
+        address,
+        subdistrict_id,
+        district_id,
+        province_id,
+        zip_code,
+        tel1,
+        tel1_ext,
+        tel2,
+        tel2_ext,
+        line_id,
+        longitude,
+        latitude,
+      } = detail;
+
+      if (!recipient_detail_id) {
+        return res.status(400).json({
+          message: "recipient_detail_id required",
+        });
+      }
+
+      if (!recipient_detail_name || !address || !tel1) {
+        return res.status(400).json({
+          message: "recipient_detail_name / address / tel1 required",
+        });
+      }
+
+      if (!subdistrict_id || !district_id || !province_id) {
+        return res.status(400).json({
+          message: "subdistrict_id / district_id / province_id required",
+        });
+      }
+
+      const [result] = await db.query(
+        `
+        UPDATE mm_recipient_details SET
+          recipient_detail_name = ?,
+          address = ?,
+          subdistrict_id = ?,
+          district_id = ?,
+          province_id = ?,
+          zip_code = ?,
+          tel1 = ?,
+          tel1_ext = ?,
+          tel2 = ?,
+          tel2_ext = ?,
+          line_id = ?,
+          longitude = ?,
+          latitude = ?
+        WHERE recipient_detail_id = ?
+          AND recipient_id = ?
+        `,
+        [
+          recipient_detail_name,
+          address,
+          subdistrict_id || null,
+          district_id || null,
+          province_id || null,
+          zip_code || null,
+          tel1,
+          tel1_ext || null,
+          tel2 || null,
+          tel2_ext || null,
+          line_id || null,
+          longitude || null,
+          latitude || null,
+          recipient_detail_id,
+          id,
+        ],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          message: "recipient detail not found",
+        });
+      }
+
+      return res.json({ message: "update recipient detail success" });
+    }
+
+    return res.status(400).json({
+      message: "invalid update mode",
+    });
   } catch (err) {
     console.error("UPDATE RECIPIENT ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-export const deleteRecipient = async (req, res) => {
-  let connection;
-
+export const updateRecipientDetailStatus = async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { customer_id, id } = req.params;
+    const { customerId, recipientId, detailId } = req.params;
+    const { is_deleted } = req.body;
 
-    if (!customer_id || !id) {
-      return res.status(400).json({ message: "customer_id / id required" });
+    if (!["N", "Y"].includes(is_deleted)) {
+      return res.status(400).json({ message: "invalid status" });
     }
 
-    // CUSTOMER ลบได้เฉพาะ customer_id ของตัวเอง
+    if (!customerId || !recipientId || !detailId) {
+      return res.status(400).json({
+        message: "customerId / recipientId / detailId required",
+      });
+    }
+
     if (Number(req.user.role_id) === 2) {
       if (!req.user.customer_id) {
         return res.status(403).json({
@@ -1363,51 +1774,34 @@ export const deleteRecipient = async (req, res) => {
         });
       }
 
-      if (String(customer_id) !== String(req.user.customer_id)) {
+      if (String(customerId) !== String(req.user.customer_id)) {
         return res.status(403).json({ message: "forbidden" });
       }
     }
 
-    connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    const [result] = await connection.query(
+    const [result] = await db.query(
       `
-      UPDATE mm_recipients
-      SET is_deleted = 'Y'
-      WHERE recipient_id = ?
-        AND customer_id = ?
-        AND is_deleted = 'N'
+      UPDATE mm_recipient_details rd
+      INNER JOIN mm_recipients r
+        ON r.recipient_id = rd.recipient_id
+      SET rd.is_deleted = ?
+      WHERE rd.recipient_detail_id = ?
+        AND rd.recipient_id = ?
+        AND r.customer_id = ?
+        AND r.is_deleted = 'N'
       `,
-      [id, customer_id],
+      [is_deleted, detailId, recipientId, customerId],
     );
 
     if (result.affectedRows === 0) {
-      await connection.rollback();
-      connection.release();
-
-      return res.status(404).json({ message: "recipient not found" });
+      return res.status(404).json({
+        message: "recipient detail not found",
+      });
     }
 
-    await connection.query(
-      `
-      UPDATE mm_recipient_details
-      SET is_deleted = 'Y',
-          is_default = 0
-      WHERE recipient_id = ?
-      `,
-      [id],
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ message: "delete recipient success" });
+    res.json({ message: "update recipient detail status success" });
   } catch (err) {
-    if (connection) await connection.rollback();
-    if (connection) connection.release();
-
-    console.error("DELETE RECIPIENT ERROR:", err);
+    console.error("UPDATE RECIPIENT DETAIL STATUS ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

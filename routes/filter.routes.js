@@ -5,7 +5,9 @@ import {
   getWarehouses,
   getZones,
   searchAddress,
-  getRecipientTypes
+  getRecipientTypes,
+  getVehicleBrands,
+  getVehicleTypes,
 } from "../controllers/filter.controller.js";
 
 const router = express.Router();
@@ -15,5 +17,7 @@ router.get("/warehouses", getWarehouses);
 router.get("/zones", getZones);
 router.get("/address-search", searchAddress);
 router.get("/recipient-types", getRecipientTypes);
+router.get("/vehicle-brands", getVehicleBrands);
+router.get("/vehicle-types", getVehicleTypes);
 
 export default router;

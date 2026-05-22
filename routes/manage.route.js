@@ -9,11 +9,11 @@ import managePackageRoutes from "./manage.package.route.js";
 
 const router = express.Router();
 
-router.use("/", manageUserRoutes);
-router.use("/", manageCustomerRoutes);
-router.use("/", manageVehicleRoutes);
-router.use("/", manageShipperRoutes);
-router.use("/", manageRecipientRoutes);
-router.use("/", managePackageRoutes);
+router.use("/users", manageUserRoutes);
+router.use("/customers", manageCustomerRoutes);
+router.use("/vehicles", manageVehicleRoutes);
+router.use("/shippers", manageShipperRoutes);
+router.use("/recipients", manageRecipientRoutes);
+router.use("/packages", managePackageRoutes);
 
 export default router;

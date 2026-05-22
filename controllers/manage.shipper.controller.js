@@ -2,6 +2,7 @@ import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
 
 /* ================= SHIPPERS ================= */
+
 export const getShippers = async (req, res) => {
   try {
     if (!req.user) {

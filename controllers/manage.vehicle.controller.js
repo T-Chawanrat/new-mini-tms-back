@@ -240,7 +240,7 @@ export const createVehicle = async (req, res) => {
   }
 };
 
-export const updateVehicle = async (req, res) => {
+export const updateVehicleStatus = async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });

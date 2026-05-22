@@ -19,7 +19,7 @@ export const getRoles = async (req, res) => {
 export const getCustomers = async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT id, name
+      SELECT id, code , name
       FROM mm_customers
       WHERE is_active = '1'
       ORDER BY id ASC
@@ -122,6 +122,34 @@ export const getRecipientTypes = async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error("GET RECIPIENT TYPES ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getVehicleBrands = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT id, name
+      FROM mm_vehicle_brands
+      ORDER BY name ASC
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getVehicleTypes = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT id, name
+      FROM mm_vehicle_types
+      ORDER BY id ASC
+    `);
+
+    res.json(rows);
+  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };

@@ -46,7 +46,7 @@ export const createCustomer = async (req, res) => {
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
 
-    const customerType = type || "EXPRESS";
+    const customerType = type || "BUSINESS";
 
     const [result] = await db.query(
       `
@@ -107,7 +107,7 @@ export const updateCustomer = async (req, res) => {
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
 
-    const customerType = type || "EXPRESS";
+    const customerType = type || "BUSINESS";
 
     await db.query(
       `
@@ -223,66 +223,70 @@ export const deleteCustomer = async (req, res) => {
   }
 };
 
-export const deleteCustomerHard = async (req, res) => {
-  let connection;
+// export const deleteCustomerHard = async (req, res) => {
+//   let connection;
 
-  try {
-    // 🔥 รองรับ token
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
+//   try {
+//     // 🔥 รองรับ token
+//     if (!req.user) {
+//       return res.status(401).json({ message: "unauthorized" });
+//     }
 
-    const { id } = req.params;
+//     const { id } = req.params;
 
-    connection = await db.getConnection();
-    await connection.beginTransaction();
+//     connection = await db.getConnection();
+//     await connection.beginTransaction();
 
-    await connection.query(`DELETE FROM um_users WHERE customer_id = ?`, [id]);
+//     await connection.query(`DELETE FROM um_users WHERE customer_id = ?`, [id]);
 
-    const [result] = await connection.query(`DELETE FROM mm_customers WHERE id = ?`, [id]);
+//     const [result] = await connection.query(`DELETE FROM mm_customers WHERE id = ?`, [id]);
 
-    if (result.affectedRows === 0) {
-      await connection.rollback();
-      connection.release();
+//     if (result.affectedRows === 0) {
+//       await connection.rollback();
+//       connection.release();
 
-      return res.status(404).json({
-        message: "customer not found",
-      });
-    }
+//       return res.status(404).json({
+//         message: "customer not found",
+//       });
+//     }
 
-    await connection.commit();
-    connection.release();
+//     await connection.commit();
+//     connection.release();
 
-    res.json({ message: "hard delete success" });
-  } catch (err) {
-    if (connection) await connection.rollback();
-    if (connection) connection.release();
+//     res.json({ message: "hard delete success" });
+//   } catch (err) {
+//     if (connection) await connection.rollback();
+//     if (connection) connection.release();
 
-    res.status(500).json({ message: err.message });
-  }
-};
+//     res.status(500).json({ message: err.message });
+//   }
+// };
 
 export const createCustomerUser = async (req, res) => {
   let connection;
 
   try {
-    // 🔥 รองรับ token
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { username, password, first_name, last_name, customer_id } = req.body;
+    const { username, first_name, last_name, customer_id } = req.body;
 
-    if (!username || !password || !customer_id) {
+    if (!username || !customer_id) {
       return res.status(400).json({
-        message: "username / password / customer required",
+        message: "username / customer required",
       });
     }
+
+    const defaultPassword = "123456";
 
     connection = await db.getConnection();
     await connection.beginTransaction();
 
-    const [exists] = await connection.query(`SELECT id FROM um_users WHERE username = ? LIMIT 1`, [username]);
+    const [exists] = await connection.query(
+      `SELECT id FROM um_users WHERE username = ? LIMIT 1`,
+      [username],
+    );
 
     if (exists.length > 0) {
       await connection.rollback();
@@ -304,7 +308,14 @@ export const createCustomerUser = async (req, res) => {
       )
       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 1)
       `,
-      [username, password, first_name || null, last_name || null, CUSTOMER_ROLE, customer_id],
+      [
+        username,
+        defaultPassword,
+        first_name || null,
+        last_name || null,
+        CUSTOMER_ROLE,
+        customer_id,
+      ],
     );
 
     await connection.commit();

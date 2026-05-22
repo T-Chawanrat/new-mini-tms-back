@@ -1,70 +1,130 @@
-export const formatDateOnly = (date) => {
-  if (!date) return null;
+// src/utils/formatDate.js
 
-  // ✅ Excel serial (เช่น 46116)
-  if (!isNaN(date)) {
-    const d = new Date((date - 25569) * 86400 * 1000);
-    if (isNaN(d.getTime())) return null;
+const pad2 = (value) => String(value).padStart(2, "0");
 
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
+const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime());
 
-    return `${year}-${month}-${day}`;
+const isExcelSerial = (value) => {
+  // Excel serial ส่วนใหญ่จะเป็นเลขประมาณ 30000+
+  // เช่น 46116 ไม่ควรใช้ !isNaN เฉย ๆ เพราะ string แปลก ๆ อาจหลุดเข้าเงื่อนไข
+  if (typeof value === "number") return value > 30000;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return /^\d+$/.test(trimmed) && Number(trimmed) > 30000;
   }
 
-  // ✅ already YYYY-MM-DD
-  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return date;
-  }
+  return false;
+};
 
-  // ✅ dd/mm/yyyy
-  if (typeof date === "string" && date.includes("/")) {
-    const [d, m, y] = date.split("/");
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
+const fromExcelSerial = (value) => {
+  const serial = Number(value);
 
-  // fallback
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return null;
+  // Excel serial date -> JS Date
+  // ใช้ UTC ก่อน แล้วค่อยดึง local ด้วย getFullYear/getMonth/getDate
+  return new Date((serial - 25569) * 86400 * 1000);
+};
 
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+const formatLocalDateParts = (date) => {
+  if (!isValidDate(date)) return null;
+
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
 
   return `${year}-${month}-${day}`;
 };
 
+const formatLocalDateTimeParts = (date) => {
+  if (!isValidDate(date)) return null;
+
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+
+  const hours = pad2(date.getHours());
+  const minutes = pad2(date.getMinutes());
+  const seconds = pad2(date.getSeconds());
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+};
+
+export const formatDateOnly = (date) => {
+  if (!date) return null;
+
+  // ✅ Excel serial เช่น 46116
+  if (isExcelSerial(date)) {
+    const d = fromExcelSerial(date);
+    return formatLocalDateParts(d);
+  }
+
+  // ✅ already YYYY-MM-DD
+  if (typeof date === "string") {
+    const trimmed = date.trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    // ✅ dd/mm/yyyy หรือ d/m/yyyy
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+      const [d, m, y] = trimmed.split("/");
+      return `${y}-${pad2(m)}-${pad2(d)}`;
+    }
+
+    // ✅ yyyy-mm-ddTHH:mm:ss.sssZ
+    // เช่น 2026-09-07T17:00:00.000Z
+    // แปลงด้วย Date แล้วดึง local date เพื่อแก้ timezone ไทย
+    const parsed = new Date(trimmed);
+    return formatLocalDateParts(parsed);
+  }
+
+  // ✅ Date object จาก mysql2
+  if (date instanceof Date) {
+    return formatLocalDateParts(date);
+  }
+
+  // fallback
+  const d = new Date(date);
+  return formatLocalDateParts(d);
+};
 
 export const formatDateTime = (date) => {
   if (!date) return null;
 
   // ✅ Excel serial
-  if (!isNaN(date)) {
-    const d = new Date((date - 25569) * 86400 * 1000);
-    if (isNaN(d.getTime())) return null;
+  if (isExcelSerial(date)) {
+    const d = fromExcelSerial(date);
+    return formatLocalDateTimeParts(d);
+  }
 
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
+  if (typeof date === "string") {
+    const trimmed = date.trim();
 
-    const hours = String(d.getHours()).padStart(2, "0");
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    const seconds = String(d.getSeconds()).padStart(2, "0");
+    // ✅ already YYYY-MM-DD HH:mm:ss
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
 
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    // ✅ already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return `${trimmed} 00:00:00`;
+    }
+
+    // ✅ dd/mm/yyyy
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(trimmed)) {
+      const [d, m, y] = trimmed.split("/");
+      return `${y}-${pad2(m)}-${pad2(d)} 00:00:00`;
+    }
+
+    const parsed = new Date(trimmed);
+    return formatLocalDateTimeParts(parsed);
+  }
+
+  if (date instanceof Date) {
+    return formatLocalDateTimeParts(date);
   }
 
   const d = new Date(date);
-  if (isNaN(d.getTime())) return null;
-
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const seconds = String(d.getSeconds()).padStart(2, "0");
-
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  return formatLocalDateTimeParts(d);
 };

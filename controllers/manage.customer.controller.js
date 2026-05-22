@@ -184,45 +184,6 @@ export const updateCustomerStatus = async (req, res) => {
   }
 };
 
-export const deleteCustomer = async (req, res) => {
-  let connection;
-
-  try {
-    // 🔥 รองรับ token
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const { id } = req.params;
-
-    connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    const [result] = await connection.query(`UPDATE mm_customers SET is_active = 0 WHERE id = ?`, [id]);
-
-    if (result.affectedRows === 0) {
-      await connection.rollback();
-      connection.release();
-
-      return res.status(404).json({
-        message: "customer not found",
-      });
-    }
-
-    await connection.query(`UPDATE um_users SET is_active = 0 WHERE customer_id = ?`, [id]);
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ message: "delete success" });
-  } catch (err) {
-    if (connection) await connection.rollback();
-    if (connection) connection.release();
-
-    res.status(500).json({ message: err.message });
-  }
-};
-
 // export const deleteCustomerHard = async (req, res) => {
 //   let connection;
 

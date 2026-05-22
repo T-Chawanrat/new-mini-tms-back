@@ -186,27 +186,6 @@ export const createUser = async (req, res) => {
       }
     }
 
-    if (citizen_id) {
-      const [existsCitizenId] = await connection.query(
-        `
-        SELECT id 
-        FROM um_users 
-        WHERE citizen_id = ? 
-        LIMIT 1
-        `,
-        [citizen_id],
-      );
-
-      if (existsCitizenId.length > 0) {
-        await connection.rollback();
-        connection.release();
-
-        return res.status(400).json({
-          message: "เลขบัตรประชาชนนี้มีในระบบแล้ว",
-        });
-      }
-    }
-
     const formattedLicenseExpire = formatDateOnly(license_expire);
 
     if (role === 7 && (!license_no || !formattedLicenseExpire)) {
@@ -320,19 +299,7 @@ export const updateUser = async (req, res) => {
 
     const { id } = req.params;
 
-    const {
-      employee_code,
-      title_name,
-      first_name,
-      last_name,
-      gender,
-      citizen_id,
-      email,
-      tel,
-      license_no,
-      license_expire,
-      is_active,
-    } = req.body;
+    const { employee_code, title_name, first_name, last_name, gender, citizen_id, email, tel, license_no, license_expire, is_active } = req.body;
 
     if (!id) {
       return res.status(400).json({ message: "id required" });
@@ -431,7 +398,6 @@ export const updateUser = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 export const changeMyPassword = async (req, res) => {
   try {

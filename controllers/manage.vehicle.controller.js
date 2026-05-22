@@ -1,7 +1,7 @@
 import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
-
-/* ================= VEHICLES ================= */
+import { normalizePlate, isValidPlate } from "../utils/plate.js";
+import { formatDateOnly } from "../utils/formatDate.js";
 
 export const getVehicles = async (req, res) => {
   try {
@@ -94,7 +94,12 @@ export const getVehicles = async (req, res) => {
 
     const [rows] = await db.query(sql, params);
 
-    res.json(rows);
+    const data = rows.map((row) => ({
+      ...row,
+      purchase_date: formatDateOnly(row.purchase_date),
+    }));
+
+    res.json(data);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -106,7 +111,7 @@ export const createVehicle = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    let {
+    const {
       license_plate,
       license_province,
       brand_id,
@@ -126,16 +131,18 @@ export const createVehicle = async (req, res) => {
       engine_no,
     } = req.body;
 
-    if (!license_plate) {
+    const plate = normalizePlate(license_plate);
+
+    if (!plate) {
       return res.status(400).json({ message: "license_plate required" });
     }
 
-    const plate = license_plate.toString().trim().toUpperCase().replace(/\s+/g, "").replace(/-/g, "");
+    if (!isValidPlate(plate)) {
+      return res.status(400).json({ message: "ทะเบียนไม่ถูกต้อง" });
+    }
 
-    if (plate.length < 4) {
-      return res.status(400).json({
-        message: "ทะเบียนไม่ถูกต้อง",
-      });
+    if (!license_province) {
+      return res.status(400).json({ message: "license_province required" });
     }
 
     if (!brand_id) {
@@ -146,33 +153,23 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "vehicle_type_id required" });
     }
 
-    if (capacity_kg === undefined || capacity_kg === "") {
-      return res.status(400).json({ message: "capacity required" });
+    if (!capacity_kg) {
+      return res.status(400).json({ message: "capacity_kg required" });
     }
 
-    if (isNaN(Number(capacity_kg))) {
-      return res.status(400).json({ message: "capacity must be number" });
+    if (!warehouse_id) {
+      return res.status(400).json({ message: "warehouse_id required" });
     }
 
-    if (max_load_kg !== undefined && max_load_kg !== "" && isNaN(Number(max_load_kg))) {
-      return res.status(400).json({ message: "max_load_kg must be number" });
-    }
-
-    if (vehicle_year !== undefined && vehicle_year !== "" && isNaN(Number(vehicle_year))) {
-      return res.status(400).json({ message: "vehicle_year must be number" });
+    if (!owner_type) {
+      return res.status(400).json({ message: "owner_type required" });
     }
 
     const allowedOwnerType = ["COMPANY", "DRIVER"];
-    const finalOwnerType = owner_type || "COMPANY";
 
-    if (!allowedOwnerType.includes(finalOwnerType)) {
+    if (!allowedOwnerType.includes(owner_type)) {
       return res.status(400).json({ message: "invalid owner_type" });
     }
-
-    const finalCapacityKg = Number(capacity_kg);
-    const finalMaxLoadKg = max_load_kg === undefined || max_load_kg === "" ? finalCapacityKg : Number(max_load_kg);
-
-    const finalStatus = "ACTIVE";
 
     const [result] = await db.query(
       `
@@ -193,36 +190,168 @@ export const createVehicle = async (req, res) => {
         purchase_date,
         fleet_card_no,
         chassis_no,
-        engine_no,
-        status,
-        is_deleted
+        engine_no
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         plate,
         license_province || null,
-        brand_id || null,
+        brand_id,
         model || null,
         color || null,
-        vehicle_year === undefined || vehicle_year === "" ? null : Number(vehicle_year),
-        vehicle_type_id || null,
+        vehicle_year || null,
+        vehicle_type_id,
         fuel_type || null,
-        finalCapacityKg,
-        finalMaxLoadKg,
-        warehouse_id || null,
-        finalOwnerType,
-        owner_name || null,
-        purchase_date || null,
+        capacity_kg,
+        max_load_kg || null,
+        warehouse_id,
+        owner_type,
+        owner_type === "DRIVER" ? owner_name || null : null,
+        owner_type === "COMPANY" ? purchase_date || null : null,
         fleet_card_no || null,
         chassis_no || null,
         engine_no || null,
-        finalStatus,
-        "N",
       ],
     );
 
     res.json({ message: "create success", id: result.insertId });
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(400).json({
+        message: "ข้อมูลรถซ้ำในระบบ",
+      });
+    }
+
+    if (err.code === "ER_NO_REFERENCED_ROW_2") {
+      return res.status(400).json({
+        message: "brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
+      });
+    }
+
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const updateVehicle = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { id } = req.params;
+
+    const {
+      license_plate,
+      license_province,
+      brand_id,
+      model,
+      color,
+      vehicle_year,
+      vehicle_type_id,
+      fuel_type,
+      capacity_kg,
+      max_load_kg,
+      warehouse_id,
+      owner_type,
+      owner_name,
+      purchase_date,
+      fleet_card_no,
+      chassis_no,
+      engine_no,
+    } = req.body;
+
+    const plate = normalizePlate(license_plate);
+
+    if (!plate) {
+      return res.status(400).json({ message: "license_plate required" });
+    }
+
+    if (!isValidPlate(plate)) {
+      return res.status(400).json({ message: "ทะเบียนไม่ถูกต้อง" });
+    }
+
+    if (!license_province) {
+      return res.status(400).json({ message: "license_province required" });
+    }
+
+    if (!brand_id) {
+      return res.status(400).json({ message: "brand_id required" });
+    }
+
+    if (!vehicle_type_id) {
+      return res.status(400).json({ message: "vehicle_type_id required" });
+    }
+
+    if (!capacity_kg) {
+      return res.status(400).json({ message: "capacity_kg required" });
+    }
+
+    if (!warehouse_id) {
+      return res.status(400).json({ message: "warehouse_id required" });
+    }
+
+    if (!owner_type) {
+      return res.status(400).json({ message: "owner_type required" });
+    }
+
+    const allowedOwnerType = ["COMPANY", "DRIVER"];
+
+    if (!allowedOwnerType.includes(owner_type)) {
+      return res.status(400).json({ message: "invalid owner_type" });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE mm_vehicles
+      SET
+        license_plate = ?,
+        license_province = ?,
+        brand_id = ?,
+        model = ?,
+        color = ?,
+        vehicle_year = ?,
+        vehicle_type_id = ?,
+        fuel_type = ?,
+        capacity_kg = ?,
+        max_load_kg = ?,
+        warehouse_id = ?,
+        owner_type = ?,
+        owner_name = ?,
+        purchase_date = ?,
+        fleet_card_no = ?,
+        chassis_no = ?,
+        engine_no = ?
+      WHERE id = ?
+        AND is_deleted = 'N'
+      `,
+      [
+        plate,
+        license_province || null,
+        brand_id,
+        model || null,
+        color || null,
+        vehicle_year || null,
+        vehicle_type_id,
+        fuel_type || null,
+        capacity_kg,
+        max_load_kg || null,
+        warehouse_id,
+        owner_type,
+        owner_type === "DRIVER" ? owner_name || null : null,
+        owner_type === "COMPANY" ? purchase_date || null : null,
+        fleet_card_no || null,
+        chassis_no || null,
+        engine_no || null,
+        id,
+      ],
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "vehicle not found" });
+    }
+
+    res.json({ message: "update success" });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(400).json({

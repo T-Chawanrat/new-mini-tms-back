@@ -4,12 +4,16 @@ export const normalizePlate = (plate) => {
   return plate
     .toString()
     .trim()
-    .toUpperCase()
     .replace(/\s+/g, "")
     .replace(/-/g, "");
 };
 
 export const isValidPlate = (plate) => {
-  const pattern = /^[0-9]{1}[ก-ฮ]{2}[0-9]{1,4}$/;
-  return pattern.test(plate);
+  const normalized = normalizePlate(plate);
+
+  // อนุญาตเฉพาะภาษาไทย + ตัวเลข
+  // ความยาว 2-8 ตัวอักษร พอสำหรับทะเบียนทั่วไป
+  const pattern = /^[ก-ฮ0-9]{2,8}$/;
+
+  return pattern.test(normalized);
 };

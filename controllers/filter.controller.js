@@ -19,7 +19,7 @@ export const getRoles = async (req, res) => {
 export const getCustomers = async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT id, code , name
+      SELECT *
       FROM mm_customers
       WHERE is_active = '1'
       ORDER BY id ASC

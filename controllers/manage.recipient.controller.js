@@ -59,9 +59,9 @@ export const getRecipients = async (req, res) => {
         a.province_name,
 
         COUNT(
-          CASE 
-            WHEN rd.recipient_detail_id IS NOT NULL 
-            THEN 1 
+          CASE
+            WHEN rd.recipient_detail_id IS NOT NULL
+            THEN 1
           END
         ) OVER (
           PARTITION BY r.recipient_id
@@ -69,8 +69,9 @@ export const getRecipients = async (req, res) => {
 
       FROM mm_recipients r
 
-      LEFT JOIN mm_customers c
+      JOIN mm_customers c
         ON c.id = r.customer_id
+        AND c.is_active = '1'
 
       LEFT JOIN mm_recipient_types rt
         ON rt.id = r.recipient_type_id

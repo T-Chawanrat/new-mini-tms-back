@@ -111,7 +111,9 @@ export const createShipper = async (req, res) => {
     // CUSTOMER สร้างได้เฉพาะ customer_id ของตัวเอง
     if (Number(req.user.role_id) === 2) {
       if (!req.user.customer_id) {
-        return res.status(403).json({ message: "customer user has no customer_id" });
+        return res.status(403).json({
+          message: "customer user has no customer_id",
+        });
       }
 
       if (String(customer_id) !== String(req.user.customer_id)) {
@@ -130,7 +132,7 @@ export const createShipper = async (req, res) => {
       SELECT id
       FROM mm_customers
       WHERE id = ?
-        AND is_active = 1
+        AND is_active = '1'
       LIMIT 1
       `,
       [customer_id],

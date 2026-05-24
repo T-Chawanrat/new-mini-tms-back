@@ -12,15 +12,10 @@ import { auth } from "../middlewares/auth.js";
 const router = express.Router();
 
 // RECIPIENTS
-router.get("/customers/:customer_id/recipients", auth, getRecipients);
-router.post("/customers/:customer_id/recipients", auth, allow(1, 2, 3, 4, 5, 10, 11), createRecipient);
-router.post("/customers/:customer_id/recipients/:id/details", auth, allow(1, 2, 3, 4, 5, 10, 11), createRecipientDetail);
-router.patch("/customers/:customer_id/recipients/:id", auth, allow(1, 2, 3, 4, 5, 10, 11), updateRecipient);
-router.patch(
-  "/customers/:customerId/recipients/:recipientId/details/:detailId/status",
-  auth,
-  allow(1, 2, 3, 4, 5, 10, 11),
-  updateRecipientDetailStatus,
-);
+router.get("/:customer_id", auth, getRecipients);
+router.post("/:customer_id", auth, allow(1, 2, 3, 4, 5, 10, 11), createRecipient);
+router.post("/:customer_id/:id/details", auth, allow(1, 2, 3, 4, 5, 10, 11), createRecipientDetail);
+router.patch("/:customerId/:recipientId/details/:detailId/status", auth, allow(1, 2, 3, 4, 5, 10, 11), updateRecipientDetailStatus);
+router.patch("/:customer_id/:id", auth, allow(1, 2, 3, 4, 5, 10, 11), updateRecipient);
 
 export default router;

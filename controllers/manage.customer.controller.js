@@ -26,7 +26,7 @@ export const getCustomers = async (req, res) => {
       `;
     }
 
-    sql += ` ORDER BY id DESC`;
+    sql += ` ORDER BY id ASC`;
 
     const [rows] = await db.query(sql);
 
@@ -45,6 +45,12 @@ export const createCustomer = async (req, res) => {
 
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
+
+      if (!code || !name) {
+        return res.status(400).json({
+          message: "code / name required",
+        });
+      }
 
     const customerType = type || "BUSINESS";
 

@@ -425,7 +425,6 @@ export const createPackageDetail = async (req, res) => {
     const {
       package_detail_code,
       package_detail_name,
-      unit_id,
       size_min,
       size_max,
       weight_min,
@@ -440,11 +439,7 @@ export const createPackageDetail = async (req, res) => {
       package_setting_id,
     } = req.body;
 
-    if (!package_detail_code || !package_detail_name) {
-      return res.status(400).json({
-        message: "package_detail_code and package_detail_name are required",
-      });
-    }
+    const unit_id = 1;
 
     if (packageRow.package_type === "BUSINESS") {
       const [result] = await db.query(
@@ -473,9 +468,9 @@ export const createPackageDetail = async (req, res) => {
           VALUES (?, ?, ?, 'N', ?, ?, ?, ?, ?, 'Y', ?, ?, NOW(), ?, ?, ?, ?, ?, ?)
         `,
         [
-          cleanCode(package_detail_code),
+          cleanCode(package_detail_code) || null,
           cleanValue(package_detail_name),
-          toNumberOrNull(unit_id),
+          unit_id,
           toNumberOrNull(size_min),
           toNumberOrNull(size_max),
           toNumberOrNull(weight_min),
@@ -522,9 +517,9 @@ export const createPackageDetail = async (req, res) => {
         VALUES (?, ?, ?, 'N', ?, ?, ?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?)
       `,
       [
-        cleanCode(package_detail_code),
+        cleanCode(package_detail_code) || null,
         cleanValue(package_detail_name),
-        toNumberOrNull(unit_id),
+        unit_id,
         toNumberOrNull(size_min),
         toNumberOrNull(size_max),
         toNumberOrNull(weight_min),
@@ -567,7 +562,6 @@ export const updatePackageDetail = async (req, res) => {
     const {
       package_detail_code,
       package_detail_name,
-      unit_id,
       size_min,
       size_max,
       weight_min,
@@ -582,11 +576,7 @@ export const updatePackageDetail = async (req, res) => {
       package_setting_id,
     } = req.body;
 
-    if (!package_detail_code || !package_detail_name) {
-      return res.status(400).json({
-        message: "package_detail_code and package_detail_name are required",
-      });
-    }
+    const unit_id = 1;
 
     if (packageRow.package_type === "BUSINESS") {
       const [result] = await db.query(
@@ -614,9 +604,9 @@ export const updatePackageDetail = async (req, res) => {
             AND is_deleted = 'N'
         `,
         [
-          cleanCode(package_detail_code),
+          cleanCode(package_detail_code) || null,
           cleanValue(package_detail_name),
-          toNumberOrNull(unit_id),
+          unit_id,
           toNumberOrNull(size_min),
           toNumberOrNull(size_max),
           toNumberOrNull(weight_min),
@@ -663,9 +653,9 @@ export const updatePackageDetail = async (req, res) => {
           AND is_deleted = 'N'
       `,
       [
-        cleanCode(package_detail_code),
+        cleanCode(package_detail_code) || null,
         cleanValue(package_detail_name),
-        toNumberOrNull(unit_id),
+        unit_id,
         toNumberOrNull(size_min),
         toNumberOrNull(size_max),
         toNumberOrNull(weight_min),

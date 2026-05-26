@@ -1,6 +1,7 @@
 import db from "../config/db.js";
 // import { importSTDService } from "../services/import/importSTD.service.js";
 import { formatDateOnly } from "../utils/formatDate.js";
+import { cleanTel } from "../utils/cleanTel.js";
 
 export const importSTD = async (req, res) => {
   let connection;
@@ -8,14 +9,24 @@ export const importSTD = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ message: "unauthorized" });
 
-    const { rows, file_name } = req.body;
-    const { id: userId, role_id: roleId, customer_id: customerId } = req.user;
+    const { rows, file_name, customer_id } = req.body;
+    const { id: userId } = req.user;
 
-    if (roleId === 2 && !customerId)
-      return res.status(400).json({ message: "customer_id missing" });
+    const customerIdValue = Number(customer_id);
 
-    const customerIdValue = roleId === 2 ? customerId : null;
-    if (!rows?.length) return res.status(400).json({ message: "no rows" });
+    if (!customerIdValue) {
+      return res.status(400).json({ message: "กรุณาเลือกลูกค้า" });
+    }
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: "no rows" });
+    }
+
+    console.log("IMPORT BODY =", {
+      customer_id,
+      file_name,
+      rows_count: rows.length,
+    });
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -39,7 +50,7 @@ export const importSTD = async (req, res) => {
       `SELECT subdistrict_id, warehouse_id FROM mm_master_addresses`,
     );
 
-    // map: subdistrict_id → warehouse_id
+    // map: subdistrict_id → to_warehouse
     const subdistrictMap = {};
     addrRows.forEach((r) => {
       subdistrictMap[r.subdistrict_id] = r.warehouse_id;
@@ -57,6 +68,7 @@ export const importSTD = async (req, res) => {
       }
 
       const tel = cleanTel(r.RECIPIENT_TEL);
+
       if (tel && !/^\d{9,10}$/.test(tel)) {
         return errorLogs.push([
           importLogId,
@@ -77,7 +89,8 @@ export const importSTD = async (req, res) => {
         ]);
       }
 
-      const warehouseId = subdistrictMap[r.subdistrict_id] || null;
+      const fromWarehouse = null;
+      const toWarehouse = subdistrictMap[r.subdistrict_id] || null;
 
       values.push([
         r.NO_BILL || null,
@@ -85,9 +98,15 @@ export const importSTD = async (req, res) => {
         null,
         r.REFERENCE,
         formatDateOnly(r.SEND_DATE),
+
         customerIdValue,
+
         r.SHIPPER_CODE || null,
+        null, // shipper_id: ไว้ lookup ทีหลัง
+
         r.RECIPIENT_CODE || null,
+        null, // recipient_id: ไว้ lookup ทีหลัง
+
         r.RECIPIENT_NAME,
         tel,
         r.RECIPIENT_ADDRESS,
@@ -95,14 +114,22 @@ export const importSTD = async (req, res) => {
         r.RECIPIENT_DISTRICT,
         r.RECIPIENT_PROVINCE,
         r.RECIPIENT_ZIPCODE,
+
         r.subdistrict_id || null,
-        warehouseId,
+        fromWarehouse,
+        toWarehouse,
+
         r.PACKAGE_CODE || null,
+        null, // package_id: ไว้ lookup ทีหลัง
+
         r.WEIGHT || null,
         r.WIDTH || null,
         r.HEIGHT || null,
         r.LENGTH || null,
         r.Q || null,
+
+        null, // price: ไว้คำนวณทีหลัง
+
         importLogId,
         1,
         "STD",
@@ -121,13 +148,39 @@ export const importSTD = async (req, res) => {
 
       const [result] = await connection.query(
         `INSERT INTO shipments (
-          no_bill, serial_no, receive_code, reference, send_date,
-          customer_id, shipper_code, recipient_code,
-          recipient_name, recipient_tel,
-          address, subdistrict, district, province, zipcode,
-          subdistrict_id, warehouse_id,
-          package_code, weight, width, height, length, q,
-          import_log_id, current_status_id, import_type, source_id, created_by
+          no_bill,
+          serial_no,
+          receive_code,
+          reference,
+          send_date,
+          customer_id,
+          shipper_code,
+          shipper_id,
+          recipient_code,
+          recipient_id,
+          recipient_name,
+          recipient_tel,
+          address,
+          subdistrict,
+          district,
+          province,
+          zipcode,
+          subdistrict_id,
+          from_warehouse,
+          to_warehouse,
+          package_code,
+          package_id,
+          weight,
+          width,
+          height,
+          length,
+          q,
+          price,
+          import_log_id,
+          current_status_id,
+          import_type,
+          source_id,
+          created_by
         ) VALUES ?`,
         [chunk],
       );
@@ -139,10 +192,10 @@ export const importSTD = async (req, res) => {
     // ===== STATUS LOG =====
     if (totalInserted) {
       const [rows] = await connection.query(
-        `SELECT id, warehouse_id 
-     FROM shipments 
-     WHERE import_log_id = ?
-     ORDER BY id`,
+        `SELECT id, to_warehouse 
+         FROM shipments 
+         WHERE import_log_id = ?
+         ORDER BY id`,
         [importLogId],
       );
 
@@ -155,13 +208,13 @@ export const importSTD = async (req, res) => {
       const statusLogs = rows.map((r) => [
         r.id,
         IMPORT_STATUS_ID,
-        r.warehouse_id,
+        r.to_warehouse,
         userId,
       ]);
 
       await connection.query(
         `INSERT INTO logs_shipment_status 
-     (shipment_id, status_id, warehouse_id, user_id) VALUES ?`,
+         (shipment_id, status_id, warehouse_id, user_id) VALUES ?`,
         [statusLogs],
       );
     }
@@ -185,8 +238,12 @@ export const importSTD = async (req, res) => {
     await connection.commit();
     connection.release();
 
-    res.json({
-      message: "นำเข้าสำเร็จ",
+    return res.json({
+      success: totalInserted > 0,
+      message:
+        errorLogs.length > 0
+          ? `นำเข้าสำเร็จ ${totalInserted} รายการ, ไม่สำเร็จ ${errorLogs.length} รายการ`
+          : "นำเข้าสำเร็จ",
       import_log_id: importLogId,
       total: totalInserted,
       failed: errorLogs.length,
@@ -196,21 +253,10 @@ export const importSTD = async (req, res) => {
       await connection.rollback();
       connection.release();
     }
-    res.status(500).json({ message: err.message });
+
+    return res.status(500).json({ message: err.message });
   }
 };
-
-// export const importSTD = async (req, res) => {
-//   try {
-//     const result = await importSTDService(req);
-
-//     res.json(result);
-//   } catch (err) {
-//     res.status(500).json({
-//       message: err.message,
-//     });
-//   }
-// };
 
 export const manual = async (req, res) => {
   let connection;
@@ -221,11 +267,7 @@ export const manual = async (req, res) => {
     }
 
     const { rows, file_name } = req.body;
-    const {
-      id: userId,
-      role_id: roleId,
-      customer_id: tokenCustomerId,
-    } = req.user;
+    const { id: userId, role_id: roleId, customer_id: tokenCustomerId } = req.user;
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(400).json({ message: "no rows" });
@@ -397,10 +439,10 @@ export const manual = async (req, res) => {
         return;
       }
 
-      const warehouseId = subdistrictMap[subdistrictId];
+      const fromWarehouse = null;
+      const toWarehouse = subdistrictMap[subdistrictId];
 
-      const rowCustomerId =
-        Number(roleId) === 2 ? tokenCustomerId : r.customer_id || null;
+      const rowCustomerId = Number(roleId) === 2 ? tokenCustomerId : r.customer_id || null;
 
       if (Number(roleId) === 2 && !tokenCustomerId) {
         errorLogs.push([
@@ -434,7 +476,8 @@ export const manual = async (req, res) => {
         zipcode,
 
         subdistrictId,
-        warehouseId,
+        fromWarehouse,
+        toWarehouse,
 
         r.package_code || null,
         r.weight ? Number(r.weight) : null,
@@ -477,7 +520,8 @@ export const manual = async (req, res) => {
           province,
           zipcode,
           subdistrict_id,
-          warehouse_id,
+          from_warehouse,
+          to_warehouse,
           package_code,
           weight,
           width,
@@ -501,7 +545,7 @@ export const manual = async (req, res) => {
     if (totalInserted > 0) {
       const [shipmentRows] = await connection.query(
         `
-        SELECT id, warehouse_id
+        SELECT id, to_warehouse
         FROM shipments
         WHERE import_log_id = ?
         ORDER BY id
@@ -512,7 +556,7 @@ export const manual = async (req, res) => {
       const statusLogs = shipmentRows.map((s) => [
         s.id,
         importStatusId,
-        s.warehouse_id,
+        s.to_warehouse,
         userId,
       ]);
 
@@ -577,137 +621,5 @@ export const manual = async (req, res) => {
     }
 
     return res.status(500).json({ message: err.message });
-  }
-};
-
-// ================= VGT =================
-export const importVGT = async (req, res) => {
-  let connection;
-
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const { rows, file_name } = req.body;
-    const userId = req.user.id;
-
-    connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    const [logResult] = await connection.query(
-      `
-      INSERT INTO logs_imports (
-        user_id, customer_id, import_type, input_type,
-        file_name, total_rows, success_rows, failed_rows
-      )
-      VALUES (?, 30, 'VGT', 'EXCEL', ?, ?, 0, 0)
-      `,
-      [userId, file_name || null, rows.length],
-    );
-
-    const importLogId = logResult.insertId;
-
-    const values = rows.map((r) => [
-      r["เลขที่บาร์โค้ด"],
-      r["เลขที่บิล"],
-      r["รหัสอ้างอิง"],
-      30,
-      r["ผู้รับ"],
-      null,
-      null,
-      r["ตำบล"],
-      r["อำเภอ"],
-      r["จังหวัด"],
-      null,
-      importLogId,
-      "VGT",
-      importLogId,
-      userId,
-      1,
-    ]);
-
-    await connection.query(
-      `
-      INSERT INTO shipments (...) VALUES ?
-      `,
-      [values],
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ message: "นำเข้าสำเร็จ" });
-  } catch (err) {
-    if (connection) await connection.rollback();
-    if (connection) connection.release();
-
-    res.status(500).json({ message: err.message });
-  }
-};
-
-// ================= ADV =================
-export const importADV = async (req, res) => {
-  let connection;
-
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const { rows, file_name } = req.body;
-    const userId = req.user.id;
-
-    connection = await db.getConnection();
-    await connection.beginTransaction();
-
-    const [logResult] = await connection.query(
-      `
-      INSERT INTO logs_imports (
-        user_id, customer_id, import_type, input_type,
-        file_name, total_rows, success_rows, failed_rows
-      )
-      VALUES (?, 22, 'ADV', 'EXCEL', ?, ?, 0, 0)
-      `,
-      [userId, file_name || null, rows.length],
-    );
-
-    const importLogId = logResult.insertId;
-
-    const values = rows.map((r) => [
-      r.box_sn,
-      r.dpe_bill_no,
-      r.dpe_bill_no,
-      22,
-      r.cusname,
-      r.cusmobile,
-      r.address,
-      r.district_name,
-      r.amphur_name,
-      r.province_name,
-      r.postcode,
-      importLogId,
-      "ADV",
-      importLogId,
-      userId,
-      1,
-    ]);
-
-    await connection.query(
-      `
-      INSERT INTO shipments (...) VALUES ?
-      `,
-      [values],
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({ message: "นำเข้าสำเร็จ" });
-  } catch (err) {
-    if (connection) await connection.rollback();
-    if (connection) connection.release();
-
-    res.status(500).json({ message: err.message });
   }
 };

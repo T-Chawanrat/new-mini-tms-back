@@ -1,5 +1,6 @@
 import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
+import { getPaginationParams } from "../utils/pagination.js";
 
 /* ================= RECIPIENTS ================= */
 
@@ -11,6 +12,7 @@ export const getRecipients = async (req, res) => {
 
     const { customer_id } = req.params;
     const { search } = req.query;
+    const { page, pageSize, skip } = getPaginationParams(req, 100, 200);
 
     const isCustomer = Number(req.user.role_id) === 2;
 
@@ -21,10 +23,85 @@ export const getRecipients = async (req, res) => {
     }
 
     if (!isCustomer && !customer_id) {
-      return res.json([]);
+      return res.json({
+        data: [],
+        pagination: {
+          page,
+          pageSize,
+          total: 0,
+          totalPages: 0,
+        },
+      });
     }
 
-    let sql = `
+    let whereSql = `
+      WHERE 1 = 1
+        AND r.is_deleted = 'N'
+    `;
+
+    const params = [];
+
+    if (isCustomer) {
+      whereSql += ` AND r.customer_id = ? `;
+      params.push(req.user.customer_id);
+    }
+
+    if (!isCustomer && customer_id) {
+      whereSql += ` AND r.customer_id = ? `;
+      params.push(customer_id);
+    }
+
+    if (search) {
+      whereSql += `
+        AND (
+          ${buildLike("r.recipient_code", search)}
+          OR ${buildLike("r.recipient_name", search)}
+          OR ${buildLike("rt.name", search)}
+          OR ${buildLike("rd.recipient_detail_name", search)}
+          OR ${buildLike("rd.address", search)}
+          OR ${buildLike("rd.tel1", search)}
+          OR ${buildLike("rd.tel2", search)}
+          OR ${buildLike("rd.zip_code", search)}
+          OR ${buildLike("rd.line_id", search)}
+          OR ${buildLike("a.subdistrict_name", search)}
+          OR ${buildLike("a.district_name", search)}
+          OR ${buildLike("a.province_name", search)}
+          OR ${buildLike("c.code", search)}
+          OR ${buildLike("c.name", search)}
+        )
+      `;
+    }
+
+    const fromSql = `
+      FROM mm_recipients r
+
+      JOIN mm_customers c
+        ON c.id = r.customer_id
+        AND c.is_active = '1'
+
+      LEFT JOIN mm_recipient_types rt
+        ON rt.id = r.recipient_type_id
+        AND rt.is_deleted = 'N'
+
+      LEFT JOIN mm_recipient_details rd
+        ON rd.recipient_id = r.recipient_id
+
+      LEFT JOIN mm_master_addresses a
+        ON a.subdistrict_id = rd.subdistrict_id
+        AND a.district_id = rd.district_id
+        AND a.province_id = rd.province_id
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      ${fromSql}
+      ${whereSql}
+    `;
+
+    const [countRows] = await db.query(countSql, params);
+    const total = Number(countRows[0]?.total || 0);
+
+    const sql = `
       SELECT
         r.recipient_id,
         r.recipient_code,
@@ -67,73 +144,28 @@ export const getRecipients = async (req, res) => {
           PARTITION BY r.recipient_id
         ) AS address_count
 
-      FROM mm_recipients r
+      ${fromSql}
+      ${whereSql}
 
-      JOIN mm_customers c
-        ON c.id = r.customer_id
-        AND c.is_active = '1'
-
-      LEFT JOIN mm_recipient_types rt
-        ON rt.id = r.recipient_type_id
-        AND rt.is_deleted = 'N'
-
-      LEFT JOIN mm_recipient_details rd
-        ON rd.recipient_id = r.recipient_id
-
-      LEFT JOIN mm_master_addresses a
-        ON a.subdistrict_id = rd.subdistrict_id
-        AND a.district_id = rd.district_id
-        AND a.province_id = rd.province_id
-
-      WHERE 1 = 1
-        AND r.is_deleted = 'N'
-    `;
-
-    const params = [];
-
-    if (isCustomer) {
-      sql += ` AND r.customer_id = ? `;
-      params.push(req.user.customer_id);
-    }
-
-    if (!isCustomer && customer_id) {
-      sql += ` AND r.customer_id = ? `;
-      params.push(customer_id);
-    }
-
-    if (search) {
-      sql += `
-        AND (
-          ${buildLike("r.recipient_code", search)}
-          OR ${buildLike("r.recipient_name", search)}
-          OR ${buildLike("rt.name", search)}
-          OR ${buildLike("rd.recipient_detail_name", search)}
-          OR ${buildLike("rd.address", search)}
-          OR ${buildLike("rd.tel1", search)}
-          OR ${buildLike("rd.tel2", search)}
-          OR ${buildLike("rd.zip_code", search)}
-          OR ${buildLike("rd.line_id", search)}
-          OR ${buildLike("a.subdistrict_name", search)}
-          OR ${buildLike("a.district_name", search)}
-          OR ${buildLike("a.province_name", search)}
-          OR ${buildLike("c.code", search)}
-          OR ${buildLike("c.name", search)}
-        )
-      `;
-    }
-
-    sql += `
       ORDER BY
         r.recipient_id DESC,
         CASE WHEN rd.is_deleted = 'N' THEN 0 ELSE 1 END,
         rd.recipient_detail_id ASC
 
-      LIMIT 1000
+      LIMIT ? OFFSET ?
     `;
 
-    const [rows] = await db.query(sql, params);
+    const [rows] = await db.query(sql, [...params, pageSize, skip]);
 
-    res.json(rows);
+    res.json({
+      data: rows,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+      },
+    });
   } catch (err) {
     console.error("GET RECIPIENTS ERROR:", err);
     res.status(500).json({ message: err.message });

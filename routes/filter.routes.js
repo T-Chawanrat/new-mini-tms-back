@@ -8,6 +8,8 @@ import {
   getRecipientTypes,
   getVehicleBrands,
   getVehicleTypes,
+  getReceivePayments,
+  getReceiveDeliveryTypes,
 } from "../controllers/filter.controller.js";
 
 const router = express.Router();
@@ -19,5 +21,7 @@ router.get("/address-search", searchAddress);
 router.get("/recipient-types", getRecipientTypes);
 router.get("/vehicle-brands", getVehicleBrands);
 router.get("/vehicle-types", getVehicleTypes);
+router.get("/payments", getReceivePayments);
+router.get("/delivery-types", getReceiveDeliveryTypes);
 
 export default router;

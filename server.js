@@ -15,6 +15,7 @@ import manageRoutes from "./routes/manage.route.js";
 import shipmentsRoute from "./routes/shipments.routes.js";
 import importRoutes from "./routes/import.routes.js";
 import scanWarehouseRoutes from "./routes/scan.warehouse.routes.js";
+import receiveRoute from "./routes/receive.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +26,7 @@ app.use(
     skip: (req, res) => {
       return req.url.startsWith("/uploads");
     },
-  })
+  }),
 );
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
@@ -43,7 +44,7 @@ app.use("/manage", manageRoutes);
 app.use("/shipments", shipmentsRoute);
 app.use("/import", importRoutes);
 app.use("/scan", scanWarehouseRoutes);
-
+app.use("/receives", receiveRoute);
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

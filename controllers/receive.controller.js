@@ -57,10 +57,6 @@ export const getReceiveShippers = async (req, res) => {
     const { customer_id } = req.params;
     const { search } = req.query;
 
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
     }
@@ -77,27 +73,10 @@ export const getReceiveShippers = async (req, res) => {
         AND (
           ${buildLike("s.shipper_code", search)}
           OR ${buildLike("s.shipper_name", search)}
-          OR ${buildLike("s.tel", search)}
           OR ${buildLike("s.address", search)}
-          OR ${buildLike("s.zip_code", search)}
-          OR ${buildLike("a.subdistrict_name", search)}
-          OR ${buildLike("a.district_name", search)}
-          OR ${buildLike("a.province_name", search)}
         )
       `;
     }
-
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM mm_shippers s
-
-      LEFT JOIN mm_master_addresses a
-        ON a.subdistrict_id = s.subdistrict_id
-        AND a.district_id = s.district_id
-        AND a.province_id = s.province_id
-
-      ${whereSql}
-    `;
 
     const dataSql = `
       SELECT
@@ -108,39 +87,24 @@ export const getReceiveShippers = async (req, res) => {
 
         s.subdistrict_id,
         s.district_id,
-        s.province_id,
-        s.zip_code,
-        s.tel,
-
-        a.subdistrict_name,
-        a.district_name,
-        a.province_name
+        s.province_id
 
       FROM mm_shippers s
-
-      LEFT JOIN mm_master_addresses a
-        ON a.subdistrict_id = s.subdistrict_id
-        AND a.district_id = s.district_id
-        AND a.province_id = s.province_id
 
       ${whereSql}
 
       ORDER BY s.shipper_id ASC
-      LIMIT ? OFFSET ?
     `;
 
-    const [[countRow]] = await db.query(countSql, params);
-    const [rows] = await db.query(dataSql, [...params, limit, offset]);
-
-    const total = Number(countRow?.total || 0);
+    const [rows] = await db.query(dataSql, params);
 
     return res.json({
       data: rows,
       pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        page: 1,
+        limit: rows.length,
+        total: rows.length,
+        totalPages: 1,
       },
     });
   } catch (err) {
@@ -153,10 +117,6 @@ export const getReceiveRecipients = async (req, res) => {
   try {
     const { customer_id } = req.params;
     const { search } = req.query;
-
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
-    const offset = (page - 1) * limit;
 
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
@@ -177,29 +137,9 @@ export const getReceiveRecipients = async (req, res) => {
           OR ${buildLike("rd.recipient_detail_name", search)}
           OR ${buildLike("rd.address", search)}
           OR ${buildLike("rd.tel1", search)}
-          OR ${buildLike("rd.zip_code", search)}
-          OR ${buildLike("a.subdistrict_name", search)}
-          OR ${buildLike("a.district_name", search)}
-          OR ${buildLike("a.province_name", search)}
-        )
+          )
       `;
     }
-
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM mm_recipients r
-
-      LEFT JOIN mm_recipient_details rd
-        ON rd.recipient_id = r.recipient_id
-        AND rd.is_deleted = 'N'
-
-      LEFT JOIN mm_master_addresses a
-        ON a.subdistrict_id = rd.subdistrict_id
-        AND a.district_id = rd.district_id
-        AND a.province_id = rd.province_id
-
-      ${whereSql}
-    `;
 
     const dataSql = `
       SELECT
@@ -238,22 +178,19 @@ export const getReceiveRecipients = async (req, res) => {
         r.recipient_id DESC,
         CASE WHEN rd.is_default = 'Y' THEN 0 ELSE 1 END,
         rd.recipient_detail_id DESC
-
-      LIMIT ? OFFSET ?
     `;
 
-    const [[countRow]] = await db.query(countSql, params);
-    const [rows] = await db.query(dataSql, [...params, limit, offset]);
+    const [rows] = await db.query(dataSql, params);
 
-    const total = Number(countRow?.total || 0);
+    const total = rows.length;
 
     return res.json({
       data: rows,
       pagination: {
-        page,
-        limit,
+        page: 1,
+        limit: total,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages: 1,
       },
     });
   } catch (err) {
@@ -266,14 +203,6 @@ export const getReceivePackages = async (req, res) => {
   try {
     const { customer_id } = req.params;
     const { search } = req.query;
-
-    if (!customer_id) {
-      return res.status(400).json({ message: "customer_id is required" });
-    }
-
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 100);
-    const offset = (page - 1) * limit;
 
     const searchText = search ? String(search).trim() : "";
 
@@ -291,9 +220,12 @@ export const getReceivePackages = async (req, res) => {
 
     if (searchText) {
       packageWhere += `
-        AND p.package_name LIKE ?
+        AND (
+          p.package_name LIKE ?
+          OR p.package_code LIKE ?
+        )
       `;
-      packageParams.push(`%${searchText}%`);
+      packageParams.push(`%${searchText}%`, `%${searchText}%`);
     }
 
     const unionSql = `
@@ -378,13 +310,6 @@ export const getReceivePackages = async (req, res) => {
         AND p.type = 'EXPRESS'
     `;
 
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM (
-        ${unionSql}
-      ) x
-    `;
-
     const dataSql = `
       SELECT *
       FROM (
@@ -393,25 +318,14 @@ export const getReceivePackages = async (req, res) => {
       ORDER BY
         x.package_id ASC,
         x.package_detail_id ASC
-      LIMIT ? OFFSET ?
     `;
 
-    const countParams = [...packageParams, ...packageParams];
-    const dataParams = [...packageParams, ...packageParams, limit, offset];
+    const dataParams = [...packageParams, ...packageParams];
 
-    const [[countRow]] = await db.query(countSql, countParams);
     const [rows] = await db.query(dataSql, dataParams);
-
-    const total = Number(countRow?.total || 0);
 
     return res.json({
       data: rows,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
     });
   } catch (err) {
     console.error("GET RECEIVE PACKAGES ERROR:", err);

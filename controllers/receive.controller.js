@@ -57,11 +57,49 @@ export const getReceiveShippers = async (req, res) => {
     const { customer_id } = req.params;
     const { search } = req.query;
 
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
     }
 
-    let sql = `
+    let whereSql = `
+      WHERE s.customer_id = ?
+        AND s.is_deleted = 'N'
+    `;
+
+    const params = [customer_id];
+
+    if (search) {
+      whereSql += `
+        AND (
+          ${buildLike("s.shipper_code", search)}
+          OR ${buildLike("s.shipper_name", search)}
+          OR ${buildLike("s.tel", search)}
+          OR ${buildLike("s.address", search)}
+          OR ${buildLike("s.zip_code", search)}
+          OR ${buildLike("a.subdistrict_name", search)}
+          OR ${buildLike("a.district_name", search)}
+          OR ${buildLike("a.province_name", search)}
+        )
+      `;
+    }
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM mm_shippers s
+
+      LEFT JOIN mm_master_addresses a
+        ON a.subdistrict_id = s.subdistrict_id
+        AND a.district_id = s.district_id
+        AND a.province_id = s.province_id
+
+      ${whereSql}
+    `;
+
+    const dataSql = `
       SELECT
         s.shipper_id,
         s.shipper_code,
@@ -85,30 +123,26 @@ export const getReceiveShippers = async (req, res) => {
         AND a.district_id = s.district_id
         AND a.province_id = s.province_id
 
-      WHERE s.customer_id = ?
-        AND s.is_deleted = 'N'
+      ${whereSql}
+
+      ORDER BY s.shipper_id ASC
+      LIMIT ? OFFSET ?
     `;
 
-    const params = [customer_id];
+    const [[countRow]] = await db.query(countSql, params);
+    const [rows] = await db.query(dataSql, [...params, limit, offset]);
 
-    if (search) {
-      sql += `
-        AND (
-          ${buildLike("s.shipper_code", search)}
-          OR ${buildLike("s.shipper_name", search)}
-          OR ${buildLike("s.tel", search)}
-        
-        )
-      `;
-    }
+    const total = Number(countRow?.total || 0);
 
-    sql += `
-      ORDER BY s.shipper_id DESC
-      `;
-
-    const [rows] = await db.query(sql, params);
-
-    return res.json(rows);
+    return res.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (err) {
     console.error("GET RECEIVE SHIPPERS ERROR:", err);
     return res.status(500).json({ message: err.message });
@@ -120,11 +154,54 @@ export const getReceiveRecipients = async (req, res) => {
     const { customer_id } = req.params;
     const { search } = req.query;
 
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
     }
 
-    let sql = `
+    let whereSql = `
+      WHERE r.customer_id = ?
+        AND r.is_deleted = 'N'
+    `;
+
+    const params = [customer_id];
+
+    if (search) {
+      whereSql += `
+        AND (
+          ${buildLike("r.recipient_code", search)}
+          OR ${buildLike("r.recipient_name", search)}
+          OR ${buildLike("rd.recipient_detail_name", search)}
+          OR ${buildLike("rd.address", search)}
+          OR ${buildLike("rd.tel1", search)}
+          OR ${buildLike("rd.zip_code", search)}
+          OR ${buildLike("a.subdistrict_name", search)}
+          OR ${buildLike("a.district_name", search)}
+          OR ${buildLike("a.province_name", search)}
+        )
+      `;
+    }
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM mm_recipients r
+
+      LEFT JOIN mm_recipient_details rd
+        ON rd.recipient_id = r.recipient_id
+        AND rd.is_deleted = 'N'
+
+      LEFT JOIN mm_master_addresses a
+        ON a.subdistrict_id = rd.subdistrict_id
+        AND a.district_id = rd.district_id
+        AND a.province_id = rd.province_id
+
+      ${whereSql}
+    `;
+
+    const dataSql = `
       SELECT
         r.recipient_id,
         r.recipient_code,
@@ -152,41 +229,192 @@ export const getReceiveRecipients = async (req, res) => {
 
       LEFT JOIN mm_master_addresses a
         ON a.subdistrict_id = rd.subdistrict_id
+        AND a.district_id = rd.district_id
+        AND a.province_id = rd.province_id
 
-      WHERE r.customer_id = ?
-        AND r.is_deleted = 'N'
-    `;
+      ${whereSql}
 
-    const params = [customer_id];
-
-    if (search) {
-      sql += `
-        AND (
-          ${buildLike("r.recipient_code", search)}
-          OR ${buildLike("r.recipient_name", search)}
-          OR ${buildLike("rd.recipient_detail_name", search)}
-          OR ${buildLike("rd.address", search)}
-          OR ${buildLike("rd.tel1", search)}
-          OR ${buildLike("rd.zip_code", search)}
-          OR ${buildLike("a.subdistrict_name", search)}
-          OR ${buildLike("a.district_name", search)}
-          OR ${buildLike("a.province_name", search)}
-        )
-      `;
-    }
-
-    sql += `
       ORDER BY
-        r.recipient_id ASC,
+        r.recipient_id DESC,
         CASE WHEN rd.is_default = 'Y' THEN 0 ELSE 1 END,
-        rd.recipient_detail_id ASC
+        rd.recipient_detail_id DESC
+
+      LIMIT ? OFFSET ?
     `;
 
-    const [rows] = await db.query(sql, params);
+    const [[countRow]] = await db.query(countSql, params);
+    const [rows] = await db.query(dataSql, [...params, limit, offset]);
 
-    return res.json(rows);
+    const total = Number(countRow?.total || 0);
+
+    return res.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (err) {
     console.error("GET RECEIVE RECIPIENTS ERROR:", err);
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+export const getReceivePackages = async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+    const { search } = req.query;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id is required" });
+    }
+
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 100);
+    const offset = (page - 1) * limit;
+
+    const searchText = search ? String(search).trim() : "";
+
+    let packageWhere = `
+      p.customer_id = ?
+      AND p.is_deleted = 'N'
+      AND (
+        p.is_actived = 'Y'
+        OR p.is_actived = '1'
+        OR p.is_actived = 1
+      )
+    `;
+
+    const packageParams = [customer_id];
+
+    if (searchText) {
+      packageWhere += `
+        AND p.package_name LIKE ?
+      `;
+      packageParams.push(`%${searchText}%`);
+    }
+
+    const unionSql = `
+      SELECT
+        p.package_id,
+        p.package_code,
+        p.package_name,
+        p.customer_id,
+        p.type,
+
+        d.id AS package_detail_id,
+        d.package_detail_code,
+        d.package_detail_name,
+        d.unit_id,
+        d.size_min,
+        d.size_max,
+        d.weight_min,
+        d.weight_max,
+        d.cost,
+        d.cost_difference_warehouse,
+        d.cost_go,
+        d.cost_return,
+        d.is_document_return,
+        d.is_weight_fix,
+        d.is_vat,
+
+        'BUSINESS' AS package_detail_type
+
+      FROM mm_packages p
+
+      LEFT JOIN mm_package_business d
+        ON d.package_id = p.package_id
+        AND d.is_deleted = 'N'
+        AND (
+          d.is_actived = 'Y'
+          OR d.is_actived = '1'
+          OR d.is_actived = 1
+        )
+
+      WHERE ${packageWhere}
+        AND p.type = 'BUSINESS'
+
+      UNION ALL
+
+      SELECT
+        p.package_id,
+        p.package_code,
+        p.package_name,
+        p.customer_id,
+        p.type,
+
+        d.id AS package_detail_id,
+        d.package_detail_code,
+        d.package_detail_name,
+        d.unit_id,
+        d.size_min,
+        d.size_max,
+        d.weight_min,
+        d.weight_max,
+        d.cost,
+        d.cost_difference_warehouse,
+        d.cost_go,
+        d.cost_return,
+        d.is_document_return,
+        NULL AS is_weight_fix,
+        NULL AS is_vat,
+
+        'EXPRESS' AS package_detail_type
+
+      FROM mm_packages p
+
+      LEFT JOIN mm_package_express d
+        ON d.package_id = p.package_id
+        AND d.is_deleted = 'N'
+        AND (
+          d.is_actived = 'Y'
+          OR d.is_actived = '1'
+          OR d.is_actived = 1
+        )
+
+      WHERE ${packageWhere}
+        AND p.type = 'EXPRESS'
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM (
+        ${unionSql}
+      ) x
+    `;
+
+    const dataSql = `
+      SELECT *
+      FROM (
+        ${unionSql}
+      ) x
+      ORDER BY
+        x.package_id ASC,
+        x.package_detail_id ASC
+      LIMIT ? OFFSET ?
+    `;
+
+    const countParams = [...packageParams, ...packageParams];
+    const dataParams = [...packageParams, ...packageParams, limit, offset];
+
+    const [[countRow]] = await db.query(countSql, countParams);
+    const [rows] = await db.query(dataSql, dataParams);
+
+    const total = Number(countRow?.total || 0);
+
+    return res.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    console.error("GET RECEIVE PACKAGES ERROR:", err);
     return res.status(500).json({ message: err.message });
   }
 };

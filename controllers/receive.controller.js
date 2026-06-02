@@ -27,6 +27,7 @@ export const getReceiveCustomers = async (req, res) => {
         name
       FROM mm_customers
       WHERE is_active = '1'
+        AND type = 'BUSINESS'
     `;
 
     if (search) {
@@ -40,7 +41,6 @@ export const getReceiveCustomers = async (req, res) => {
 
     sql += `
       ORDER BY id ASC
-      LIMIT 300
     `;
 
     const [rows] = await db.query(sql);
@@ -214,9 +214,10 @@ export const getReceivePackages = async (req, res) => {
         OR p.is_actived = '1'
         OR p.is_actived = 1
       )
+      AND p.type = 'BUSINESS'
     `;
 
-    const packageParams = [customer_id];
+    const params = [customer_id];
 
     if (searchText) {
       packageWhere += `
@@ -225,10 +226,10 @@ export const getReceivePackages = async (req, res) => {
           OR p.package_code LIKE ?
         )
       `;
-      packageParams.push(`%${searchText}%`, `%${searchText}%`);
+      params.push(`%${searchText}%`, `%${searchText}%`);
     }
 
-    const unionSql = `
+    const sql = `
       SELECT
         p.package_id,
         p.package_code,
@@ -250,9 +251,7 @@ export const getReceivePackages = async (req, res) => {
         d.cost_return,
         d.is_document_return,
         d.is_weight_fix,
-        d.is_vat,
-
-        'BUSINESS' AS package_detail_type
+        d.is_vat
 
       FROM mm_packages p
 
@@ -266,63 +265,13 @@ export const getReceivePackages = async (req, res) => {
         )
 
       WHERE ${packageWhere}
-        AND p.type = 'BUSINESS'
 
-      UNION ALL
-
-      SELECT
-        p.package_id,
-        p.package_code,
-        p.package_name,
-        p.customer_id,
-        p.type,
-
-        d.id AS package_detail_id,
-        d.package_detail_code,
-        d.package_detail_name,
-        d.unit_id,
-        d.size_min,
-        d.size_max,
-        d.weight_min,
-        d.weight_max,
-        d.cost,
-        d.cost_difference_warehouse,
-        d.cost_go,
-        d.cost_return,
-        d.is_document_return,
-        NULL AS is_weight_fix,
-        NULL AS is_vat,
-
-        'EXPRESS' AS package_detail_type
-
-      FROM mm_packages p
-
-      LEFT JOIN mm_package_express d
-        ON d.package_id = p.package_id
-        AND d.is_deleted = 'N'
-        AND (
-          d.is_actived = 'Y'
-          OR d.is_actived = '1'
-          OR d.is_actived = 1
-        )
-
-      WHERE ${packageWhere}
-        AND p.type = 'EXPRESS'
-    `;
-
-    const dataSql = `
-      SELECT *
-      FROM (
-        ${unionSql}
-      ) x
       ORDER BY
-        x.package_id ASC,
-        x.package_detail_id ASC
+        p.package_id ASC,
+        d.id ASC
     `;
 
-    const dataParams = [...packageParams, ...packageParams];
-
-    const [rows] = await db.query(dataSql, dataParams);
+    const [rows] = await db.query(sql, params);
 
     return res.json({
       data: rows,

@@ -73,8 +73,7 @@ export const getReceiveShippers = async (req, res) => {
         AND (
           ${buildLike("s.shipper_code", search)}
           OR ${buildLike("s.shipper_name", search)}
-          OR ${buildLike("s.address", search)}
-        )
+          )
       `;
     }
 
@@ -87,9 +86,20 @@ export const getReceiveShippers = async (req, res) => {
 
         s.subdistrict_id,
         s.district_id,
-        s.province_id
+        s.province_id,
+        s.zip_code,
+        s.tel,
+
+        addr.subdistrict_name,
+        addr.district_name,
+        addr.province_name
 
       FROM mm_shippers s
+
+      LEFT JOIN mm_master_addresses addr
+        ON addr.subdistrict_id = s.subdistrict_id
+        AND addr.district_id = s.district_id
+        AND addr.province_id = s.province_id
 
       ${whereSql}
 
@@ -224,9 +234,10 @@ export const getReceivePackages = async (req, res) => {
         AND (
           p.package_name LIKE ?
           OR p.package_code LIKE ?
+          OR d.package_detail_name LIKE ?
         )
       `;
-      params.push(`%${searchText}%`, `%${searchText}%`);
+      params.push(`%${searchText}%`, `%${searchText}%`, `%${searchText}%`);
     }
 
     const sql = `
@@ -258,11 +269,6 @@ export const getReceivePackages = async (req, res) => {
       LEFT JOIN mm_package_business d
         ON d.package_id = p.package_id
         AND d.is_deleted = 'N'
-        AND (
-          d.is_actived = 'Y'
-          OR d.is_actived = '1'
-          OR d.is_actived = 1
-        )
 
       WHERE ${packageWhere}
 

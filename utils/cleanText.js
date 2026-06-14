@@ -19,6 +19,12 @@ export const cleanCode = (value) => {
   return String(value).trim();
 };
 
+export const cleanFileNamePart = (value) => {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "");
+};
+
 export const toNumberOrNull = (value) => {
   if (value === undefined || value === null || value === "") return null;
 

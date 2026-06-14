@@ -288,6 +288,56 @@ export const getReceivePackages = async (req, res) => {
   }
 };
 
+export const getShipperROCode = async (req, res) => {
+  try {
+    const { customer_id, shipper_id } = req.params;
+
+    if (!customer_id || !shipper_id) {
+      return res.status(400).json({
+        message: "customer_id / shipper_id required",
+      });
+    }
+
+    const [shipperRows] = await db.query(
+      `
+      SELECT shipper_id
+      FROM mm_shippers
+      WHERE shipper_id = ?
+        AND customer_id = ?
+        AND is_deleted = 'N'
+      LIMIT 1
+      `,
+      [shipper_id, customer_id],
+    );
+
+    if (shipperRows.length === 0) {
+      return res.status(404).json({
+        message: "shipper not found",
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        ro_code_id,
+        shipper_id,
+        ro_code,
+        ro_name
+      FROM mm_shipper_ro_code
+      WHERE shipper_id = ?
+        AND is_deleted = 'N'
+      ORDER BY ro_code ASC
+      `,
+      [shipper_id],
+    );
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("GET SHIPPER RO CODE ERROR:", err);
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 export const createReceive = async (req, res) => {
   const conn = await db.getConnection();
 

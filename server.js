@@ -13,9 +13,11 @@ import labelRoute from "./routes/labelRoute.js";
 import authRoute from "./routes/auth.routes.js";
 import manageRoutes from "./routes/manage.route.js";
 import shipmentsRoute from "./routes/shipments.routes.js";
-import importRoutes from "./routes/import.routes.js";
+// import importRoutes from "./routes/import.routes.js";
 import scanWarehouseRoutes from "./routes/scan.warehouse.routes.js";
 import receiveRoute from "./routes/receive.route.js";
+import createReceiveRoute from "./routes/create.receive.routes.js";
+import receiveImportRoutes from "./routes/receive.import.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,9 +44,12 @@ app.use("/", labelRoute);
 app.use("/", authRoute);
 app.use("/manage", manageRoutes);
 app.use("/shipments", shipmentsRoute);
-app.use("/import", importRoutes);
+// app.use("/import", importRoutes);
 app.use("/scan", scanWarehouseRoutes);
 app.use("/receives", receiveRoute);
+app.use("/create", createReceiveRoute);
+app.use("/create", receiveImportRoutes);
+
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

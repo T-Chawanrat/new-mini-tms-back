@@ -1,11 +1,11 @@
 import express from "express";
 import {
-  createReceive,
   getReceiveShippers,
   getReceiveRecipients,
   getReceiveCustomers,
   getReceivePackages,
-  getShipperROCode
+  getShipperROCode,
+  getRecipientCalendar,
 } from "../controllers/receive.controller.js";
 import { auth } from "../middlewares/auth.js";
 import { allow } from "../middlewares/allow.js";
@@ -17,6 +17,6 @@ router.get("/options/shippers/:customer_id", getReceiveShippers);
 router.get("/options/recipients/:customer_id", getReceiveRecipients);
 router.get("/options/packages/:customer_id", getReceivePackages);
 router.get("/options/ro-codes/:customer_id/:shipper_id", getShipperROCode);
-router.post("/", createReceive);
+router.get("/options/recipient-calendar/:customer_id/:recipient_detail_id", getRecipientCalendar);
 
 export default router;

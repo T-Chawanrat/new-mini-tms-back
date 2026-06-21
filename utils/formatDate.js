@@ -128,3 +128,10 @@ export const formatDateTime = (date) => {
   const d = new Date(date);
   return formatLocalDateTimeParts(d);
 };
+
+export const addDaysDateOnly = (days = 0, baseDate = new Date()) => {
+  const date = new Date(baseDate);
+  date.setDate(date.getDate() + Number(days || 0));
+
+  return formatDateOnly(date);
+};

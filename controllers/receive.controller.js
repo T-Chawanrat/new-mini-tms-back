@@ -1,20 +1,8 @@
 import db from "../config/db.js";
-import { cleanTel } from "../utils/cleanTel.js";
-import { cleanValue, cleanCode, toNumberOrNull } from "../utils/cleanText.js";
-import { formatDateOnly } from "../utils/formatDate.js";
 import { buildLike } from "../utils/cleanText.js";
+import { formatDateOnly ,addDaysDateOnly } from "../utils/formatDate.js";
 
-const CUSTOMER_ROLE = 2;
 
-const yn = (value, defaultValue = "N") => {
-  const v = String(value || defaultValue).toUpperCase();
-  return v === "Y" ? "Y" : "N";
-};
-
-const appCreate = (value = "WEB") => {
-  const v = String(value || "WEB").toUpperCase();
-  return ["WEB", "API", "IMPORT"].includes(v) ? v : "WEB";
-};
 
 export const getReceiveCustomers = async (req, res) => {
   try {
@@ -73,7 +61,7 @@ export const getReceiveShippers = async (req, res) => {
         AND (
           ${buildLike("s.shipper_code", search)}
           OR ${buildLike("s.shipper_name", search)}
-          )
+        )
       `;
     }
 
@@ -147,7 +135,7 @@ export const getReceiveRecipients = async (req, res) => {
           OR ${buildLike("rd.recipient_detail_name", search)}
           OR ${buildLike("rd.address", search)}
           OR ${buildLike("rd.tel1", search)}
-          )
+        )
       `;
     }
 
@@ -213,6 +201,10 @@ export const getReceivePackages = async (req, res) => {
   try {
     const { customer_id } = req.params;
     const { search } = req.query;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id is required" });
+    }
 
     const searchText = search ? String(search).trim() : "";
 
@@ -300,12 +292,12 @@ export const getShipperROCode = async (req, res) => {
 
     const [shipperRows] = await db.query(
       `
-      SELECT shipper_id
-      FROM mm_shippers
-      WHERE shipper_id = ?
-        AND customer_id = ?
-        AND is_deleted = 'N'
-      LIMIT 1
+        SELECT shipper_id
+        FROM mm_shippers
+        WHERE shipper_id = ?
+          AND customer_id = ?
+          AND is_deleted = 'N'
+        LIMIT 1
       `,
       [shipper_id, customer_id],
     );
@@ -318,15 +310,15 @@ export const getShipperROCode = async (req, res) => {
 
     const [rows] = await db.query(
       `
-      SELECT
-        ro_code_id,
-        shipper_id,
-        ro_code,
-        ro_name
-      FROM mm_shipper_ro_code
-      WHERE shipper_id = ?
-        AND is_deleted = 'N'
-      ORDER BY ro_code ASC
+        SELECT
+          ro_code_id,
+          shipper_id,
+          ro_code,
+          ro_name
+        FROM mm_shipper_ro_code
+        WHERE shipper_id = ?
+          AND is_deleted = 'N'
+        ORDER BY ro_code ASC
       `,
       [shipper_id],
     );
@@ -338,183 +330,128 @@ export const getShipperROCode = async (req, res) => {
   }
 };
 
-export const createReceive = async (req, res) => {
-  const conn = await db.getConnection();
-
+export const getRecipientCalendar = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
+    const { customer_id, recipient_detail_id } = req.params;
+
+    if (!customer_id) {
+      return res.status(400).json({ message: "customer_id is required" });
     }
 
-    const isCustomer = Number(req.user.role_id) === CUSTOMER_ROLE;
-
-    const {
-      receive_code,
-      customer_id,
-      shipper_id,
-      recipient_id,
-      recipient_detail_id,
-      recipient_name,
-      address,
-      province_id,
-      district_id,
-      subdistrict_id,
-      zip_code,
-      tel,
-      delivery_date,
-      is_cod,
-      cod,
-      is_document_return,
-      document_return,
-      payment_type_id,
-      from_warehouse_id,
-      to_warehouse_id,
-      is_pickup_customer,
-      is_pickup_shipper,
-      is_invoices,
-      app_create,
-      reference_no,
-      is_returned,
-      remark,
-    } = req.body;
-
-    const finalCustomerId = isCustomer ? req.user.customer_id : customer_id;
-
-    if (!cleanCode(receive_code)) {
-      return res.status(400).json({ message: "กรุณาระบุเลข DO" });
+    if (!recipient_detail_id) {
+      return res.status(400).json({ message: "recipient_detail_id is required" });
     }
 
-    if (!finalCustomerId) {
-      return res.status(400).json({ message: "กรุณาเลือกลูกค้า" });
+    const sql = `
+      SELECT
+        r.recipient_id,
+        r.recipient_code,
+        r.recipient_name,
+
+        rd.recipient_detail_id,
+        rd.recipient_detail_name,
+        rd.subdistrict_id,
+        rd.district_id,
+        rd.province_id,
+        rd.zip_code,
+
+        sd.id AS subdistrict_day_id,
+        sd.day,
+        sd.day_id,
+        sd.transit_days
+
+      FROM mm_recipient_details rd
+
+      INNER JOIN mm_recipients r
+        ON r.recipient_id = rd.recipient_id
+        AND r.customer_id = ?
+        AND r.is_deleted = 'N'
+
+      LEFT JOIN mm_subdistrict_days sd
+        ON sd.subdistrict_id = rd.subdistrict_id
+        AND sd.is_deleted = 'N'
+        AND sd.is_actived = 'Y'
+        AND sd.day_id IS NOT NULL
+        AND sd.day_id BETWEEN 0 AND 6
+
+      WHERE rd.recipient_detail_id = ?
+        AND rd.is_deleted = 'N'
+
+      ORDER BY sd.day_id ASC
+    `;
+
+    const [rows] = await db.query(sql, [customer_id, recipient_detail_id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "ไม่พบข้อมูลผู้รับ หรือผู้รับนี้ไม่ได้อยู่ใน customer นี้",
+      });
     }
 
-    if (!cleanValue(recipient_name)) {
-      return res.status(400).json({ message: "กรุณาระบุชื่อผู้รับ" });
-    }
+    const first = rows[0];
 
-    if (!cleanValue(address)) {
-      return res.status(400).json({ message: "กรุณาระบุที่อยู่" });
-    }
+    const serviceDays = rows
+      .filter((row) => row.day_id !== null && row.day_id !== undefined)
+      .map((row) => ({
+        id: row.subdistrict_day_id,
+        day: row.day,
+        day_id: Number(row.day_id),
+      }))
+      .filter((row) => Number.isFinite(row.day_id) && row.day_id >= 0 && row.day_id <= 6);
 
-    await conn.beginTransaction();
+    const serviceDayIds = serviceDays.map((item) => item.day_id);
 
-    const [dup] = await conn.query(
+    const transitDays = first.transit_days === null || first.transit_days === undefined ? null : Number(first.transit_days);
+
+    const today = addDaysDateOnly(0);
+    const endDate = addDaysDateOnly(90);
+
+    const [holidayRows] = await db.query(
       `
-        SELECT receive_id
-        FROM tm_receives
-        WHERE receive_code = ?
-          AND is_deleted = 'N'
-        LIMIT 1
+        SELECT
+          holiday_date,
+          holiday_name
+        FROM mm_holidays
+        WHERE is_deleted = 'N'
+          AND is_actived = 'Y'
+          AND holiday_date BETWEEN ? AND ?
+        ORDER BY holiday_date ASC
       `,
-      [cleanCode(receive_code)],
+      [today, endDate],
     );
 
-    if (dup.length) {
-      await conn.rollback();
-      return res.status(409).json({ message: "เลข DO นี้มีอยู่แล้ว" });
-    }
+    const holidays = holidayRows
+      .map((row) => ({
+        holiday_date: formatDateOnly(row.holiday_date),
+        holiday_name: row.holiday_name,
+      }))
+      .filter((item) => item.holiday_date);
 
-    const finalIsCod = yn(is_cod);
-    const finalIsDocumentReturn = yn(is_document_return);
+    const holidayDates = holidays.map((item) => item.holiday_date);
 
-    const [result] = await conn.query(
-      `
-        INSERT INTO tm_receives (
-          receive_date,
-          receive_code,
-          customer_id,
-          shipper_id,
-          recipient_id,
-          recipient_detail_id,
-          recipient_name,
-          address,
-          province_id,
-          district_id,
-          subdistrict_id,
-          zip_code,
-          tel,
-          delivery_date,
-          is_cod,
-          cod,
-          is_document_return,
-          document_return,
-          payment_type_id,
-          is_deleted,
-          is_approved,
-          from_warehouse_id,
-          to_warehouse_id,
-          create_date,
-          is_pickup_customer,
-          is_pickup_shipper,
-          is_invoices,
-          app_create,
-          reference_no,
-          is_returned,
-          remark,
-          updated_at
-        )
-        VALUES (
-          NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
-          'N', 'N',
-          ?, ?,
-          NOW(),
-          ?, ?, ?, ?, ?, ?, ?,
-          NOW()
-        )
-      `,
-      [
-        cleanCode(receive_code),
-        toNumberOrNull(finalCustomerId),
-        toNumberOrNull(shipper_id),
-        toNumberOrNull(recipient_id),
-        toNumberOrNull(recipient_detail_id),
-        cleanValue(recipient_name),
-        cleanValue(address),
-        toNumberOrNull(province_id),
-        toNumberOrNull(district_id),
-        toNumberOrNull(subdistrict_id),
-        cleanCode(zip_code),
-        cleanTel(tel),
-        formatDateOnly(delivery_date),
+    return res.json({
+      recipient_id: first.recipient_id,
+      recipient_code: first.recipient_code,
+      recipient_name: first.recipient_name,
 
-        finalIsCod,
-        finalIsCod === "Y" ? Number(cod || 0) : 0,
+      recipient_detail_id: first.recipient_detail_id,
+      recipient_detail_name: first.recipient_detail_name,
 
-        finalIsDocumentReturn,
-        finalIsDocumentReturn === "Y" ? cleanValue(document_return) : null,
+      subdistrict_id: first.subdistrict_id,
+      district_id: first.district_id,
+      province_id: first.province_id,
+      zip_code: first.zip_code,
 
-        toNumberOrNull(payment_type_id),
+      transit_days: Number.isFinite(transitDays) ? transitDays : null,
 
-        toNumberOrNull(from_warehouse_id),
-        toNumberOrNull(to_warehouse_id),
+      service_days: serviceDays,
+      service_day_ids: serviceDayIds,
 
-        yn(is_pickup_customer),
-        yn(is_pickup_shipper),
-        yn(is_invoices),
-        appCreate(app_create),
-
-        cleanCode(reference_no),
-        yn(is_returned),
-        cleanValue(remark),
-      ],
-    );
-
-    await conn.commit();
-
-    return res.status(201).json({
-      message: "created",
-      receive_id: result.insertId,
+      holidays,
+      holiday_dates: holidayDates,
     });
-  } catch (error) {
-    await conn.rollback();
-    console.error("createReceive error:", error);
-
-    return res.status(500).json({
-      message: "server error",
-      error: error.message,
-    });
-  } finally {
-    conn.release();
+  } catch (err) {
+    console.error("GET RECIPIENT CALENDAR ERROR:", err);
+    return res.status(500).json({ message: err.message });
   }
 };

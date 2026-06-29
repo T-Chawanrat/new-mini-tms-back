@@ -16,7 +16,7 @@ import shipmentsRoute from "./routes/shipments.routes.js";
 // import importRoutes from "./routes/import.routes.js";
 import scanWarehouseRoutes from "./routes/scan.warehouse.routes.js";
 import receiveRoute from "./routes/receive.route.js";
-import createReceiveRoute from "./routes/create.receive.routes.js";
+import createReceiveRoute from "./routes/receive.create.routes.js";
 import receiveImportRoutes from "./routes/receive.import.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);

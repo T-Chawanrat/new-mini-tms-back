@@ -4,6 +4,13 @@ import { randomUUID } from "crypto";
 
 import { cleanCode, cleanDbText, formatDateYYYYMMDD, padNumber, toNumberOrNull, toNumberOrZero } from "./cleanText.js";
 
+const createReceiveError = (message, details = {}) => {
+  const error = new Error(message);
+  error.status = 400;
+  error.details = details;
+  return error;
+};
+
 export const generateReceiveCode = async (conn, customerId) => {
   const [customerRows] = await conn.query(
     `
@@ -256,7 +263,7 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
   const cleanSerialNo = cleanCode(serialNo);
 
   if (!cleanSerialNo) {
-    throw createImportError("serial_no required");
+    throw createReceiveError("serial_no required");
   }
 
   const [existingRows] = await conn.query(
@@ -271,7 +278,7 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
   );
 
   if (existingRows.length > 0) {
-    throw createImportError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
+    throw createReceiveError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
   }
 
   const serialId = randomUUID();
@@ -292,7 +299,7 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
     };
   } catch (error) {
     if (error?.code === "ER_DUP_ENTRY") {
-      throw createImportError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
+      throw createReceiveError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
     }
 
     throw error;

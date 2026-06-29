@@ -1,7 +1,7 @@
-// server/routes/create.receive.routes.js
+// server/routes/receive.create.routes.js
 
 import express from "express";
-import { createReceive } from "../controllers/create.receive.controller.js";
+import { createReceive } from "../controllers/receive.create.controller.js";
 import { auth } from "../middlewares/auth.js";
 import { allow } from "../middlewares/allow.js";
 

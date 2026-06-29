@@ -206,7 +206,7 @@ export const createReceive = async (req, res) => {
 
     console.error("CREATE RECEIVE ERROR:", error);
 
-    const statusCode = error.statusCode || 500;
+    const statusCode = error.statusCode || error.status || 500;
 
     return res.status(statusCode).json({
       message: error.message || "create receive failed",

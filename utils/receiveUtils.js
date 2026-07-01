@@ -305,3 +305,166 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
     throw error;
   }
 };
+
+export const insertCreateReceiveSerials = async (conn, receiveId) => {
+  const cleanReceiveId = toNumberOrNull(receiveId);
+
+  if (!cleanReceiveId) {
+    throw createReceiveError("receive_id required for tm_receive_serials");
+  }
+
+  await conn.query(
+    `
+      INSERT INTO tm_receive_serials (
+        receive_code,
+        receive_business_id,
+        receive_date,
+        receive_walkin_id,
+        delivery_date,
+
+        serial_id,
+        serial_no,
+
+        package_id,
+        package_name,
+        package_detail_id,
+        package_detail_name,
+
+        customer_id,
+        cost,
+
+        from_warehouse_id,
+        to_warehouse_id,
+
+        recipient_name,
+        recipient_code,
+        address,
+
+        district_id,
+        district_name,
+        subdistrict_id,
+        subdistrict_name,
+        province_id,
+        province_name,
+
+        zip_code,
+        tel,
+
+        item_is_deleted,
+
+        recipient_id,
+        shipper_id,
+        shipper_name,
+
+        document_return_id,
+        remark,
+        url,
+        cod,
+
+        weight,
+        width,
+        length,
+        height,
+        q,
+
+        is_returned,
+        payment_type_id,
+        recipient_detail_id,
+        recipient_detail_name,
+
+        deleted_date,
+        deleted_by_user,
+
+        vol,
+        size_type,
+
+        create_date_1_2,
+        last_modified,
+        customer_type
+      )
+      SELECT
+        r.receive_code,
+        r.receive_id AS receive_business_id,
+        r.receive_date,
+        NULL AS receive_walkin_id,
+        r.delivery_date,
+
+        i.serial_id,
+        i.serial_no,
+
+        d.package_id,
+        d.package_name,
+        d.package_detail_id,
+        pb.package_detail_name,
+
+        r.customer_id,
+        d.cost,
+
+        r.from_warehouse_id,
+        r.to_warehouse_id,
+
+        r.recipient_name,
+        rec.recipient_code,
+        r.address,
+
+        r.district_id,
+        ma.district_name,
+        r.subdistrict_id,
+        ma.subdistrict_name,
+        r.province_id,
+        ma.province_name,
+
+        r.zip_code,
+        r.tel,
+
+        COALESCE(i.is_deleted, 'N') AS item_is_deleted,
+
+        r.recipient_id,
+        r.shipper_id,
+        s.shipper_name,
+
+        r.document_return_id,
+        r.remark,
+        NULL AS url,
+        r.cod,
+
+        d.weight,
+        d.width,
+        d.length,
+        d.height,
+        d.q,
+
+        COALESCE(r.is_returned, 'N') AS is_returned,
+        r.payment_type_id,
+        r.recipient_detail_id,
+        rd.recipient_detail_name,
+
+        NULL AS deleted_date,
+        NULL AS deleted_by_user,
+
+        d.vol,
+        d.size_type,
+
+        NOW() AS create_date_1_2,
+        NOW() AS last_modified,
+        'BUSINESS' AS customer_type
+      FROM tm_receives r
+      INNER JOIN tm_receive_details d
+        ON d.receive_id = r.receive_id
+      LEFT JOIN tm_receive_detail_items i
+        ON i.receive_detail_id = d.receive_detail_id
+      LEFT JOIN mm_package_business pb
+        ON pb.id = d.package_detail_id
+      LEFT JOIN mm_recipients rec
+        ON rec.recipient_id = r.recipient_id
+      LEFT JOIN mm_recipient_details rd
+        ON rd.recipient_detail_id = r.recipient_detail_id
+      LEFT JOIN mm_master_addresses ma
+        ON ma.subdistrict_id = r.subdistrict_id
+      LEFT JOIN mm_shippers s
+        ON s.shipper_id = r.shipper_id
+      WHERE r.receive_id = ?
+    `,
+    [cleanReceiveId],
+  );
+};

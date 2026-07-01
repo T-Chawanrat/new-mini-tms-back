@@ -21,6 +21,8 @@ import {
   buildImportDetailData,
   buildImportDetailItemData,
   createActiveSerialOrThrow,
+  getPackageByCode,
+  insertImportReceiveSerials,
 } from "../utils/receiveImportUtils.js";
 
 export const importReceivesFromExcel = async (req, res) => {
@@ -93,6 +95,7 @@ export const importReceivesFromExcel = async (req, res) => {
 
     const addressCache = new Map();
     const shipperCache = new Map();
+    const packageCache = new Map();
 
     const receiveCodeByNoBill = await buildReceiveCodeMapByNoBill({
       conn,
@@ -144,9 +147,19 @@ export const importReceivesFromExcel = async (req, res) => {
       const receiveId = headResult.insertId;
 
       for (const row of billRows) {
+        const packageData = await getPackageByCode({
+          conn,
+          customerId,
+          packageCode: row.package_code,
+          q: row.q,
+          weight: row.weight,
+          cache: packageCache,
+        });
+
         const detailData = buildImportDetailData({
           receiveId,
           row,
+          packageData,
         });
 
         const { sql: detailSql, values: detailValues } = buildInsertSql("tm_receive_import_details", detailData);
@@ -168,6 +181,8 @@ export const importReceivesFromExcel = async (req, res) => {
           await conn.query(itemSql, itemValues);
         }
       }
+
+      await insertImportReceiveSerials(conn, receiveId);
 
       queueProcessed += 1;
     }

@@ -58,6 +58,22 @@ const normalizeYN = (value) => {
   return toYN(raw);
 };
 
+const isYN = (value, expected) => {
+  return String(value ?? "").trim().toUpperCase() === expected;
+};
+
+const isValueInRange = (value, min, max) => {
+  const cleanValue = toNumberOrNull(value);
+  const cleanMin = toNumberOrNull(min);
+  const cleanMax = toNumberOrNull(max);
+
+  if (cleanValue === null || cleanMin === null || cleanMax === null) {
+    return false;
+  }
+
+  return cleanValue >= cleanMin && cleanValue <= cleanMax;
+};
+
 export const normalizeImportRow = (row, rowIndex) => {
   return {
     row_no: rowIndex + 2,
@@ -211,9 +227,17 @@ export const validateImportHeadRow = (row) => {
     return `แถว ${row.row_no}: ไม่พบ subdistrict_id`;
   }
 
+  if (!row.package_code) {
+    return `แถว ${row.row_no}: ไม่พบ PACKAGE_CODE`;
+  }
+
+  if (row.q === null && row.weight === null) {
+    return `แถว ${row.row_no}: ต้องมี Q หรือ WEIGHT อย่างน้อย 1 ค่า`;
+  }
+
   if (row.is_serial_no === "Y" && !row.serial_no) {
-  return `แถว ${row.row_no}: IS_SERIAL_NO = Y แต่ไม่พบ SERIAL_NO`;
-}
+    return `แถว ${row.row_no}: IS_SERIAL_NO = Y แต่ไม่พบ SERIAL_NO`;
+  }
 
   return null;
 };
@@ -630,17 +654,221 @@ export const buildImportHeadData = ({
   };
 };
 
-export const buildImportDetailData = ({ receiveId, row }) => {
+const findMatchedPackageBusiness = ({ businessRows, q, weight }) => {
+  const activeRows = businessRows.filter((row) => {
+    return row && isYN(row.business_is_deleted, "N");
+  });
+
+  if (activeRows.length === 0) {
+    return null;
+  }
+
+  const weightFixRow = activeRows.find((row) => isYN(row.is_weight_fix, "Y"));
+
+  if (weightFixRow) {
+    return {
+      selectedRow: weightFixRow,
+      priceBy: "FIX",
+      sizeMatchedRow: null,
+      weightMatchedRow: null,
+    };
+  }
+
+  const sizeMatchedRow = activeRows.find((row) => {
+    return isValueInRange(q, row.size_min, row.size_max);
+  });
+
+  const weightMatchedRow = activeRows.find((row) => {
+    return isValueInRange(weight, row.weight_min, row.weight_max);
+  });
+
+  if (!sizeMatchedRow && !weightMatchedRow) {
+    return null;
+  }
+
+  if (sizeMatchedRow && !weightMatchedRow) {
+    return {
+      selectedRow: sizeMatchedRow,
+      priceBy: "SIZE",
+      sizeMatchedRow,
+      weightMatchedRow: null,
+    };
+  }
+
+  if (!sizeMatchedRow && weightMatchedRow) {
+    return {
+      selectedRow: weightMatchedRow,
+      priceBy: "WEIGHT",
+      sizeMatchedRow: null,
+      weightMatchedRow,
+    };
+  }
+
+  const sizeCost = toNumberOrZero(sizeMatchedRow.cost);
+  const weightCost = toNumberOrZero(weightMatchedRow.cost);
+
+  if (weightCost > sizeCost) {
+    return {
+      selectedRow: weightMatchedRow,
+      priceBy: "WEIGHT",
+      sizeMatchedRow,
+      weightMatchedRow,
+    };
+  }
+
+  return {
+    selectedRow: sizeMatchedRow,
+    priceBy: "SIZE",
+    sizeMatchedRow,
+    weightMatchedRow,
+  };
+};
+
+export const getPackageByCode = async ({
+  conn,
+  customerId,
+  packageCode,
+  q,
+  weight,
+  cache,
+}) => {
+  const cleanCustomerId = toNumberOrNull(customerId);
+  const cleanPackageCode = cleanCode(packageCode);
+
+  if (!cleanCustomerId) {
+    throw createImportError("ไม่พบ customer_id สำหรับค้นหา package");
+  }
+
+  if (!cleanPackageCode) {
+    throw createImportError("ไม่พบ PACKAGE_CODE");
+  }
+
+  const cacheKey = `${cleanCustomerId}:${cleanPackageCode}`;
+
+  let packageRows = cache.get(cacheKey);
+
+  if (!packageRows) {
+    const [rows] = await conn.query(
+      `
+        SELECT
+          p.package_id,
+          p.package_code,
+          p.package_name,
+          p.customer_id,
+          p.is_document_return AS package_is_document_return,
+
+          pb.id AS package_detail_id,
+          pb.package_detail_code,
+          pb.package_detail_name,
+          pb.unit_id,
+          pb.is_deleted AS business_is_deleted,
+          pb.size_min,
+          pb.size_max,
+          pb.weight_min,
+          pb.weight_max,
+          pb.cost,
+          pb.is_actived AS business_is_actived,
+          pb.cost_difference_warehouse,
+          pb.is_document_return AS detail_is_document_return,
+          pb.cost_go,
+          pb.cost_return,
+          pb.is_weight_fix,
+          pb.is_vat
+        FROM mm_packages p
+        INNER JOIN mm_package_business pb
+          ON pb.package_id = p.package_id
+        WHERE p.package_code = ?
+          AND p.customer_id = ?
+          AND p.is_deleted = 'N'
+          AND p.is_actived = 'Y'
+          AND pb.is_deleted = 'N'
+        ORDER BY p.package_id ASC, pb.id ASC
+      `,
+      [cleanPackageCode, cleanCustomerId],
+    );
+
+    if (rows.length === 0) {
+      throw createImportError(
+        `ไม่พบ PACKAGE_CODE ${cleanPackageCode} ของ customer นี้ หรือ package ไม่ active`,
+      );
+    }
+
+    packageRows = rows;
+    cache.set(cacheKey, packageRows);
+  }
+
+  const matched = findMatchedPackageBusiness({
+    businessRows: packageRows,
+    q,
+    weight,
+  });
+
+  if (!matched) {
+    throw createImportError(
+      `PACKAGE_CODE ${cleanPackageCode}: ไม่พบเรทราคาที่ตรงกับ Q=${q ?? "-"} / WEIGHT=${weight ?? "-"}`,
+    );
+  }
+
+  const selected = matched.selectedRow;
+
+  return {
+    package_id: selected.package_id,
+    package_code: selected.package_code,
+    package_name: selected.package_name,
+
+    package_detail_id: selected.package_detail_id,
+    package_detail_code: selected.package_detail_code,
+    package_detail_name: selected.package_detail_name,
+
+    unit_id: selected.unit_id,
+
+    cost: toNumberOrZero(selected.cost),
+    cost_difference: toNumberOrZero(selected.cost_difference_warehouse),
+
+    price_by: matched.priceBy,
+
+    size_min: selected.size_min,
+    size_max: selected.size_max,
+    weight_min: selected.weight_min,
+    weight_max: selected.weight_max,
+
+    is_document_return:
+      selected.detail_is_document_return ??
+      selected.package_is_document_return ??
+      null,
+  };
+};
+
+export const buildImportDetailData = ({ receiveId, row, packageData }) => {
   return {
     receive_id: receiveId,
 
+    package_id: packageData.package_id,
+    package_detail_id: packageData.package_detail_id,
+    package_name: packageData.package_name,
+
+    unit_name: null,
+
+    qty: 1,
+
+    cost: packageData.cost,
     weight: row.weight,
+    cost_difference: packageData.cost_difference,
+
+    remark: row.note,
+
     width: row.width,
     height: row.height,
     length: row.length,
+
+    cost_island: 0,
+    cost_other: 0,
+
     q: row.q,
 
-    is_document_return: row.is_document_return,
+    size_type: null,
+
+    is_document_return: row.is_document_return ?? packageData.is_document_return,
   };
 };
 
@@ -703,4 +931,163 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
 
     throw error;
   }
+};
+
+export const insertImportReceiveSerials = async (conn, receiveId) => {
+  const cleanReceiveId = toNumberOrNull(receiveId);
+
+  if (!cleanReceiveId) {
+    throw createImportError("receive_id required for tm_receive_serials");
+  }
+
+  await conn.query(
+    `
+      INSERT INTO tm_receive_serials (
+        receive_code,
+        receive_business_id,
+        receive_date,
+        receive_walkin_id,
+        delivery_date,
+
+        serial_id,
+        serial_no,
+
+        package_id,
+        package_name,
+        package_detail_id,
+        package_detail_name,
+
+        customer_id,
+        cost,
+
+        from_warehouse_id,
+        to_warehouse_id,
+
+        recipient_name,
+        recipient_code,
+        address,
+
+        district_id,
+        district_name,
+        subdistrict_id,
+        subdistrict_name,
+        province_id,
+        province_name,
+
+        zip_code,
+        tel,
+
+        item_is_deleted,
+
+        recipient_id,
+        shipper_id,
+        shipper_name,
+
+        document_return_id,
+        remark,
+        url,
+        cod,
+
+        weight,
+        width,
+        length,
+        height,
+        q,
+
+        is_returned,
+        payment_type_id,
+        recipient_detail_id,
+        recipient_detail_name,
+
+        deleted_date,
+        deleted_by_user,
+
+        vol,
+        size_type,
+
+        create_date_1_2,
+        last_modified,
+        customer_type
+      )
+      SELECT
+        h.receive_code,
+        h.receive_id AS receive_business_id,
+        h.receive_date,
+        NULL AS receive_walkin_id,
+        h.delivery_date,
+
+        i.serial_id,
+        i.serial_no,
+
+        d.package_id,
+        d.package_name,
+        d.package_detail_id,
+        pb.package_detail_name,
+
+        h.customer_id,
+        d.cost,
+
+        h.from_warehouse_id,
+        h.to_warehouse_id,
+
+        h.recipient_name,
+        NULL AS recipient_code,
+        h.address,
+
+        h.district_id,
+        ma.district_name,
+        h.subdistrict_id,
+        ma.subdistrict_name,
+        h.province_id,
+        ma.province_name,
+
+        h.zip_code,
+        h.tel,
+
+        COALESCE(i.is_deleted, 'N') AS item_is_deleted,
+
+        NULL AS recipient_id,
+        h.shipper_id,
+        s.shipper_name,
+
+        h.document_return AS document_return_id,
+        h.remark,
+        NULL AS url,
+        h.cod,
+
+        d.weight,
+        d.width,
+        d.length,
+        d.height,
+        d.q,
+
+        'N' AS is_returned,
+        h.payment_type_id,
+        NULL AS recipient_detail_id,
+        NULL AS recipient_detail_name,
+
+        NULL AS deleted_date,
+        NULL AS deleted_by_user,
+
+        NULL AS vol,
+        d.size_type,
+
+        NOW() AS create_date_1_2,
+        NOW() AS last_modified,
+        'BUSINESS' AS customer_type
+      FROM tm_receive_import_head h
+      INNER JOIN tm_receive_import_details d
+        ON d.receive_id = h.receive_id
+      LEFT JOIN tm_receive_import_detail_items i
+        ON i.receive_detail_id = d.receive_detail_id
+      LEFT JOIN mm_package_business pb
+        ON pb.id = d.package_detail_id
+      LEFT JOIN mm_master_addresses ma
+        ON ma.subdistrict_id = h.subdistrict_id
+      LEFT JOIN mm_shippers s
+        ON s.shipper_id = h.shipper_id
+      WHERE h.receive_id = ?
+    `,
+    [cleanReceiveId],
+  );
 };

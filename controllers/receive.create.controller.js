@@ -14,6 +14,7 @@ import {
   buildReceiveDetailData,
   buildReceiveDetailItems,
   createActiveSerialOrThrow,
+  insertCreateReceiveSerials,
 } from "../utils/receiveUtils.js";
 
 export const createReceive = async (req, res) => {
@@ -186,6 +187,8 @@ export const createReceive = async (req, res) => {
         receiveItemCount += 1;
       }
     }
+
+    await insertCreateReceiveSerials(conn, receiveId);
 
     await conn.commit();
     transactionStarted = false;

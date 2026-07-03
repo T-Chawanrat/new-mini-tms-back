@@ -19,6 +19,7 @@ import receiveRoute from "./routes/receive.route.js";
 import createReceiveRoute from "./routes/receive.create.routes.js";
 import receiveImportRoutes from "./routes/receive.import.routes.js";
 import holidayRoutes from "./routes/holiday.routes.js";
+import receiveReportRoute from "./routes/receive.report.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,7 @@ app.use("/receives", receiveRoute);
 app.use("/create", createReceiveRoute);
 app.use("/create", receiveImportRoutes);
 app.use("/holidays", holidayRoutes);
+app.use("/receive-report", receiveReportRoute);
 
 
 app.get("/test", (req, res) => {

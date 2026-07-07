@@ -235,3 +235,175 @@ export const importReceivesFromExcel = async (req, res) => {
     conn.release();
   }
 };
+
+export const validateReceiveImportRows = async (req, res) => {
+  const conn = await db.getConnection();
+
+  try {
+    const customerId = toNumberOrNull(req.body.customer_id);
+    const inputRows = req.body.rows;
+
+    if (!customerId) {
+      return res.status(400).json({
+        success: false,
+        message: "กรุณาเลือก Customer ก่อนตรวจสอบข้อมูล",
+      });
+    }
+
+    if (!Array.isArray(inputRows) || inputRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "ไม่พบข้อมูลสำหรับตรวจสอบ",
+      });
+    }
+
+    const rows = inputRows
+      .map((row, index) => normalizeImportRow(row, index))
+      .filter((row) => !isEmptyImportRow(row));
+
+    const invalidRows = {};
+
+    const addressCache = new Map();
+    const shipperCache = new Map();
+
+    const addError = (index, field, message) => {
+      if (!invalidRows[index]) {
+        invalidRows[index] = {};
+      }
+
+      invalidRows[index][field] = message;
+    };
+
+    const normalizeCompare = (value) => {
+      return String(value || "").trim();
+    };
+
+    const pickAddressValue = (address, keys) => {
+      for (const key of keys) {
+        if (address?.[key] !== undefined && address?.[key] !== null) {
+          return address[key];
+        }
+      }
+
+      return "";
+    };
+
+    for (const row of rows) {
+      const index = row.row_index ?? row.__row_index ?? row.index ?? 0;
+
+      const subdistrictId = toNumberOrNull(row.subdistrict_id);
+      const shipperCode = String(row.shipper_code || "").trim();
+
+      if (!subdistrictId) {
+        addError(index, "subdistrict_id", "ไม่มี subdistrict_id");
+      } else {
+        try {
+          const recipientAddress = await getMasterAddressBySubdistrictId(
+            conn,
+            subdistrictId,
+            addressCache
+          );
+
+          const masterSubdistrict = normalizeCompare(
+            pickAddressValue(recipientAddress, [
+              "subdistrict_name",
+              "subdistrict",
+              "SUBDISTRICT_NAME",
+              "SUBDISTRICT",
+              "name_th",
+            ])
+          );
+
+          const masterDistrict = normalizeCompare(
+            pickAddressValue(recipientAddress, [
+              "district_name",
+              "district",
+              "DISTRICT_NAME",
+              "DISTRICT",
+              "amphur_name",
+            ])
+          );
+
+          const masterProvince = normalizeCompare(
+            pickAddressValue(recipientAddress, [
+              "province_name",
+              "province",
+              "PROVINCE_NAME",
+              "PROVINCE",
+            ])
+          );
+
+          const masterZipcode = normalizeCompare(
+            pickAddressValue(recipientAddress, [
+              "zipcode",
+              "zip_code",
+              "ZIPCODE",
+              "ZIP_CODE",
+              "postcode",
+            ])
+          );
+
+          const excelSubdistrict = normalizeCompare(row.recipient_subdistrict);
+          const excelDistrict = normalizeCompare(row.recipient_district);
+          const excelProvince = normalizeCompare(row.recipient_province);
+          const excelZipcode = normalizeCompare(row.recipient_zipcode);
+
+          const canCompareAddress =
+            masterSubdistrict ||
+            masterDistrict ||
+            masterProvince ||
+            masterZipcode;
+
+          const isAddressNotMatch =
+            canCompareAddress &&
+            (
+              excelSubdistrict !== masterSubdistrict ||
+              excelDistrict !== masterDistrict ||
+              excelProvince !== masterProvince ||
+              excelZipcode !== masterZipcode
+            );
+
+          if (isAddressNotMatch) {
+            addError(
+              index,
+              "address",
+              "ที่อยู่ไม่ตรงกับ subdistrict_id ในฐานข้อมูล"
+            );
+          }
+        } catch (error) {
+          addError(index, "subdistrict_id", error.message || "ไม่พบ subdistrict_id ในระบบ");
+        }
+      }
+
+      if (!shipperCode) {
+        addError(index, "SHIPPER_CODE", "ไม่มี SHIPPER_CODE");
+      } else {
+        try {
+          await getShipperByCustomerAndCode({
+            conn,
+            customerId,
+            shipperCode,
+            cache: shipperCache,
+          });
+        } catch (error) {
+          addError(index, "SHIPPER_CODE", error.message || "ไม่พบ SHIPPER_CODE ของ Customer นี้");
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      invalidRows,
+    });
+  } catch (error) {
+    console.error("VALIDATE RECEIVE IMPORT ROWS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "ตรวจสอบข้อมูลกับฐานข้อมูลไม่สำเร็จ",
+      error: error.message,
+    });
+  } finally {
+    conn.release();
+  }
+};

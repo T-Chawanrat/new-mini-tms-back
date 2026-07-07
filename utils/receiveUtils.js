@@ -151,14 +151,12 @@ export const getSafeQty = (value) => {
  * สร้าง SN Auto ตอนรายการไม่มี barcode
  *
  * รูปแบบ:
- * DO-A000021-20260615-0001-TMGXXXXXXXX
- *
- * XXXXXXXX = สุ่ม 8 ตัว พิมพ์ใหญ่
+ * DO-A000021-20260615-0001-001
+ * DO-A000021-20260615-0001-002
+ * DO-A000021-20260615-0001-003
  */
-export const makeAutoSerial = (receiveCode) => {
-  const randomText = randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase();
-
-  return `${receiveCode}-TMG${randomText}`;
+export const makeAutoSerial = (receiveCode, running) => {
+  return `${receiveCode}-${padNumber(running, 3)}`;
 };
 
 /**
@@ -217,33 +215,40 @@ export const buildReceiveDetailData = ({ receiveId, row }) => {
  *
  * หมายเหตุ:
  * serial_id จะถูกเติมทีหลังใน controller
- * โดยใช้ getOrCreateProductSerial(conn, serial_no)
+ * โดยใช้ createActiveSerialOrThrow(conn, serial_no)
  */
-export const buildReceiveDetailItems = ({ receiveCode, receiveDetailId, row }) => {
+export const buildReceiveDetailItems = ({ receiveCode, receiveDetailId, row, startRunning = 1 }) => {
   const qty = getSafeQty(row.qty);
   const barcode = cleanCode(row.barcode);
 
   // กรณีสแกน barcode มา
   // frontend set qty = 1 อยู่แล้ว
+  // ใช้ barcode จริง และไม่เพิ่ม auto running
   if (barcode) {
-    return [
-      {
-        receive_detail_id: receiveDetailId,
+    return {
+      items: [
+        {
+          receive_detail_id: receiveDetailId,
 
-        // ยังไม่ใส่ตรงนี้ เดี๋ยว controller ไปหา/สร้างจาก tm_product_actived ก่อน
-        serial_id: null,
+          // ยังไม่ใส่ตรงนี้ เดี๋ยว controller ไปหา/สร้างจาก tm_product_actived ก่อน
+          serial_id: null,
 
-        serial_no: barcode,
-        is_deleted: "N",
-        deleted_by: null,
-        deleted_time: null,
-      },
-    ];
+          serial_no: barcode,
+          is_deleted: "N",
+          deleted_by: null,
+          deleted_time: null,
+        },
+      ],
+      nextRunning: startRunning,
+    };
   }
 
+  let running = startRunning;
+
   // กรณีไม่มี barcode ให้สร้าง SN Auto ตาม qty
-  return Array.from({ length: qty }, () => {
-    const serialNo = makeAutoSerial(receiveCode);
+  const items = Array.from({ length: qty }, () => {
+    const serialNo = makeAutoSerial(receiveCode, running);
+    running += 1;
 
     return {
       receive_detail_id: receiveDetailId,
@@ -257,6 +262,11 @@ export const buildReceiveDetailItems = ({ receiveCode, receiveDetailId, row }) =
       deleted_time: null,
     };
   });
+
+  return {
+    items,
+    nextRunning: running,
+  };
 };
 
 export const createActiveSerialOrThrow = async (conn, serialNo) => {

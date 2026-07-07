@@ -152,6 +152,7 @@ export const createReceive = async (req, res) => {
 
     let receiveDetailCount = 0;
     let receiveItemCount = 0;
+    let autoSerialRunning = 1;
 
     for (const row of packageRows) {
       const detailData = buildReceiveDetailData({
@@ -166,11 +167,15 @@ export const createReceive = async (req, res) => {
       const receiveDetailId = detailResult.insertId;
       receiveDetailCount += 1;
 
-      const detailItems = buildReceiveDetailItems({
+      const builtItems = buildReceiveDetailItems({
         receiveCode,
         receiveDetailId,
         row,
+        startRunning: autoSerialRunning,
       });
+
+      const detailItems = builtItems.items;
+      autoSerialRunning = builtItems.nextRunning;
 
       for (const item of detailItems) {
         const productSerial = await createActiveSerialOrThrow(conn, item.serial_no);

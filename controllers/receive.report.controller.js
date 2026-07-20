@@ -174,7 +174,6 @@ export const getReceiveReport = async (req, res) => {
         COALESCE(SUM(t.q), 0) AS total_qty,
         COALESCE(SUM(t.vol), 0) AS total_vol,
 
-        MAX(t.create_date_1_2) AS create_date_1_2,
         MAX(t.last_modified) AS last_modified
 
       FROM tm_receive_serials t
@@ -268,7 +267,6 @@ export const getReceiveReport = async (req, res) => {
             t.vol,
             t.size_type,
 
-            t.create_date_1_2,
             t.last_modified,
             t.customer_type
 
@@ -405,7 +403,6 @@ export const getReceiveReportSerials = async (req, res) => {
         t.vol,
         t.size_type,
 
-        t.create_date_1_2,
         t.last_modified,
         t.customer_type
 

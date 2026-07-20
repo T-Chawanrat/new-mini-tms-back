@@ -316,11 +316,17 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
   }
 };
 
-export const insertCreateReceiveSerials = async (conn, receiveId) => {
+export const insertCreateReceiveSerials = async (
+  conn,
+  receiveId,
+  sourceType = "WEB",
+) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
 
   if (!cleanReceiveId) {
-    throw createReceiveError("receive_id required for tm_receive_serials");
+    throw createReceiveError(
+      "receive_id required for tm_receive_serials",
+    );
   }
 
   await conn.query(
@@ -388,8 +394,8 @@ export const insertCreateReceiveSerials = async (conn, receiveId) => {
         vol,
         size_type,
 
-        create_date_1_2,
         last_modified,
+        source_type,
         customer_type
       )
       SELECT
@@ -455,8 +461,8 @@ export const insertCreateReceiveSerials = async (conn, receiveId) => {
         d.vol,
         d.size_type,
 
-        NOW() AS create_date_1_2,
         NOW() AS last_modified,
+        ? AS source_type,
         'BUSINESS' AS customer_type
       FROM tm_receives r
       INNER JOIN tm_receive_details d
@@ -475,6 +481,6 @@ export const insertCreateReceiveSerials = async (conn, receiveId) => {
         ON s.shipper_id = r.shipper_id
       WHERE r.receive_id = ?
     `,
-    [cleanReceiveId],
+    [sourceType, cleanReceiveId],
   );
 };

@@ -1005,7 +1005,6 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         vol,
         size_type,
 
-        create_date_1_2,
         last_modified,
         customer_type
       )
@@ -1072,8 +1071,7 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         NULL AS vol,
         d.size_type,
 
-        NOW() AS create_date_1_2,
-        NOW() AS last_modified,
+         NOW() AS last_modified,
         'BUSINESS' AS customer_type
       FROM tm_receive_import_head h
       INNER JOIN tm_receive_import_details d

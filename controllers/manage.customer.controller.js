@@ -1,4 +1,5 @@
 import db from "../config/db.js";
+import { buildLike } from "../utils/cleanText.js";
 
 /* ================= CUSTOMER ================= */
 

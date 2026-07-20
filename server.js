@@ -9,7 +9,7 @@ import morgan from "morgan";
 import billRoute from "./routes/billRoute.js";
 import billsDataRoute from "./routes/billsDataRoute.js";
 import filterRoute from "./routes/filter.routes.js";
-import labelRoute from "./routes/labelRoute.js";
+// import labelRoute from "./routes/labelRoute.js";
 import authRoute from "./routes/auth.routes.js";
 import manageRoutes from "./routes/manage.route.js";
 import shipmentsRoute from "./routes/shipments.routes.js";
@@ -20,6 +20,8 @@ import createReceiveRoute from "./routes/receive.create.routes.js";
 import receiveImportRoutes from "./routes/receive.import.routes.js";
 import holidayRoutes from "./routes/holiday.routes.js";
 import receiveReportRoute from "./routes/receive.report.route.js";
+import labelRoute from "./routes/label.route.js";
+import warehouseReceiveRoutes from "./routes/warehouse.receive.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,7 +44,7 @@ app.use("/labels", express.static(path.join(__dirname, "labels")));
 app.use("/", billRoute);
 app.use("/", billsDataRoute);
 app.use("/", filterRoute);
-app.use("/", labelRoute);
+// app.use("/", labelRoute);
 app.use("/", authRoute);
 app.use("/manage", manageRoutes);
 app.use("/shipments", shipmentsRoute);
@@ -53,7 +55,8 @@ app.use("/create", createReceiveRoute);
 app.use("/create", receiveImportRoutes);
 app.use("/holidays", holidayRoutes);
 app.use("/receive-report", receiveReportRoute);
-
+app.use("/labels", labelRoute);
+app.use("/warehouse-receives", warehouseReceiveRoutes);
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

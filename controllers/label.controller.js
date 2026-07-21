@@ -60,8 +60,20 @@ const getMasterJoinSql = () => {
     LEFT JOIN mm_warehouses_to wf
       ON wf.warehouse_id = rs.from_warehouse_id
 
-    LEFT JOIN tm_receives r
-      ON r.receive_id = rs.receive_business_id
+    LEFT JOIN (
+      SELECT
+        receive_id,
+        MAX(reference_no) AS reference_no
+      FROM tm_receive_references
+      GROUP BY receive_id
+    ) ref
+      ON ref.receive_id = CASE
+        WHEN UPPER(rs.customer_type) = 'BUSINESS'
+          THEN rs.receive_business_id
+        WHEN UPPER(rs.customer_type) = 'EXPRESS'
+          THEN rs.receive_walkin_id
+        ELSE NULL
+      END
 
     LEFT JOIN mm_recipient_details rd
       ON rd.recipient_detail_id = rs.recipient_detail_id
@@ -200,7 +212,7 @@ export const getLabelReceives = async (req, res) => {
       SELECT
         rs.receive_code,
         MAX(rs.receive_business_id) AS receive_business_id,
-        MAX(r.reference_no) AS reference_no,
+        MAX(ref.reference_no) AS reference_no,
         MIN(rs.receive_date) AS receive_date,
         MIN(rs.delivery_date) AS delivery_date,
 
@@ -320,7 +332,7 @@ export const getLabelSerials = async (req, res) => {
       SELECT
         rs.receive_code,
         rs.receive_business_id,
-        r.reference_no,
+        ref.reference_no,
         rs.receive_date,
         rs.delivery_date,
 

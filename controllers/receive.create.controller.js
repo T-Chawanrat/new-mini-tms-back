@@ -1,5 +1,3 @@
-// server/controllers/create.receive.controller.js
-
 import db from "../config/db.js";
 import { cleanTel } from "../utils/cleanTel.js";
 import { formatDateOnly } from "../utils/formatDate.js";
@@ -23,7 +21,9 @@ export const createReceive = async (req, res) => {
 
   try {
     if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
+      return res.status(401).json({
+        message: "unauthorized",
+      });
     }
 
     const isCustomer = Number(req.user.role_id) === 2;
@@ -35,31 +35,45 @@ export const createReceive = async (req, res) => {
     const finalCustomerId = isCustomer ? toNumberOrNull(req.user.customer_id) : toNumberOrNull(receiveHeader.customer_id);
 
     const shipperId = toNumberOrNull(receiveHeader.shipper_id);
+
     const recipientId = toNumberOrNull(receiveHeader.recipient_id);
+
     const recipientDetailId = toNumberOrNull(receiveHeader.recipient_detail_id);
 
     if (!finalCustomerId) {
-      return res.status(400).json({ message: "กรุณาเลือกเจ้าของงาน" });
+      return res.status(400).json({
+        message: "กรุณาเลือกเจ้าของงาน",
+      });
     }
 
     if (!shipperId) {
-      return res.status(400).json({ message: "กรุณาเลือกผู้ส่ง" });
+      return res.status(400).json({
+        message: "กรุณาเลือกผู้ส่ง",
+      });
     }
 
     if (!recipientId) {
-      return res.status(400).json({ message: "กรุณาเลือกผู้รับ" });
+      return res.status(400).json({
+        message: "กรุณาเลือกผู้รับ",
+      });
     }
 
     if (!recipientDetailId) {
-      return res.status(400).json({ message: "กรุณาเลือกที่อยู่ผู้รับ" });
+      return res.status(400).json({
+        message: "กรุณาเลือกที่อยู่ผู้รับ",
+      });
     }
 
     if (!cleanDbText(receiveHeader.recipient_name)) {
-      return res.status(400).json({ message: "กรุณาระบุชื่อผู้รับ" });
+      return res.status(400).json({
+        message: "กรุณาระบุชื่อผู้รับ",
+      });
     }
 
     if (!cleanDbText(receiveHeader.address)) {
-      return res.status(400).json({ message: "กรุณาระบุที่อยู่ผู้รับ" });
+      return res.status(400).json({
+        message: "กรุณาระบุที่อยู่ผู้รับ",
+      });
     }
 
     if (packageRows.length === 0) {
@@ -78,6 +92,7 @@ export const createReceive = async (req, res) => {
     const toWarehouseId = await getToWarehouseIdByRecipientDetail(conn, recipientDetailId);
 
     const finalIsCod = toYN(receiveHeader.is_cod);
+
     const finalIsDocumentReturn = toYN(receiveHeader.is_document_return);
 
     // ติ๊กเอกสารรับกลับได้ แต่ไม่บังคับเลือก dropdown
@@ -89,6 +104,8 @@ export const createReceive = async (req, res) => {
 
     const totalCost = toNumberOrZero(receiveHeader.net ?? receiveHeader.cost ?? receiveHeader.totalPrice ?? body.totalPrice);
 
+    const referenceNo = cleanCode(receiveHeader.reference_no);
+
     const receiveData = {
       receive_date: new Date(),
       receive_code: receiveCode,
@@ -99,21 +116,27 @@ export const createReceive = async (req, res) => {
       recipient_detail_id: recipientDetailId,
 
       recipient_name: cleanDbText(receiveHeader.recipient_name),
+
       address: cleanDbText(receiveHeader.address),
 
       province_id: toNumberOrNull(receiveHeader.province_id),
+
       district_id: toNumberOrNull(receiveHeader.district_id),
+
       subdistrict_id: toNumberOrNull(receiveHeader.subdistrict_id),
 
       zip_code: cleanCode(receiveHeader.zip_code),
+
       tel: cleanTel(receiveHeader.tel),
 
       delivery_date: formatDateOnly(receiveHeader.delivery_date),
 
       is_cod: finalIsCod,
+
       cod: finalIsCod === "Y" ? toNumberOrZero(receiveHeader.cod) : 0,
 
       is_document_return: finalIsDocumentReturn,
+
       document_return_id: finalDocumentReturnId,
 
       payment_type_id: toNumberOrNull(receiveHeader.payment_type_id),
@@ -124,6 +147,7 @@ export const createReceive = async (req, res) => {
       approve_people_id: null,
 
       from_warehouse_id: fromWarehouseId,
+
       to_warehouse_id: toWarehouseId,
 
       status: "CREATE",
@@ -132,7 +156,7 @@ export const createReceive = async (req, res) => {
       is_invoices: "N",
       app_create: "WEB",
 
-      reference_no: cleanCode(receiveHeader.reference_no),
+      reference_no: referenceNo,
       is_returned: "N",
 
       remark: cleanDbText(receiveHeader.remark),
@@ -141,19 +165,72 @@ export const createReceive = async (req, res) => {
       net: totalCost,
 
       update_by_user_id: req.user.user_id || req.user.id || null,
+
       updated_at: new Date(),
     };
 
+    /*
+    |--------------------------------------------------------------------------
+    | 1. สร้างหัวบิล
+    |--------------------------------------------------------------------------
+    */
     const insertReceive = buildInsertSql("tm_receives", receiveData);
 
     const [receiveResult] = await conn.query(insertReceive.sql, insertReceive.values);
 
     const receiveId = receiveResult.insertId;
 
+    /*
+    |--------------------------------------------------------------------------
+    | 2. บันทึกเลขอ้างอิงของบิล
+    |--------------------------------------------------------------------------
+    | tm_receive_references:
+    | - reference_id เป็น AUTO_INCREMENT
+    | - reference_no มาจากหน้าสร้างบิล
+    | - receive_id คือ tm_receives.receive_id
+    |--------------------------------------------------------------------------
+    */
+    if (referenceNo) {
+      const receiveReferenceData = {
+        reference_no: referenceNo,
+        receive_id: receiveId,
+      };
+
+      const insertReceiveReference = buildInsertSql("tm_receive_references", receiveReferenceData);
+
+      await conn.query(insertReceiveReference.sql, insertReceiveReference.values);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 3. บันทึกสถานะเริ่มต้นของบิล
+    |--------------------------------------------------------------------------
+    | tm_receive_status.receive_business_id
+    | ใช้ค่าเดียวกับ tm_receives.receive_id
+    |--------------------------------------------------------------------------
+    */
+    const receiveStatusData = {
+      receive_walkin_id: null,
+      receive_business_id: receiveId,
+      receive_code: receiveCode,
+      status_id: 1,
+      datetime: new Date(),
+      status: "รับเข้าระบบ",
+    };
+
+    const insertReceiveStatus = buildInsertSql("tm_receive_status", receiveStatusData);
+
+    await conn.query(insertReceiveStatus.sql, insertReceiveStatus.values);
+
     let receiveDetailCount = 0;
     let receiveItemCount = 0;
     let autoSerialRunning = 1;
 
+    /*
+    |--------------------------------------------------------------------------
+    | 4. สร้างรายละเอียดสินค้าและ Serial รายชิ้น
+    |--------------------------------------------------------------------------
+    */
     for (const row of packageRows) {
       const detailData = buildReceiveDetailData({
         receiveId,
@@ -165,6 +242,7 @@ export const createReceive = async (req, res) => {
       const [detailResult] = await conn.query(insertDetail.sql, insertDetail.values);
 
       const receiveDetailId = detailResult.insertId;
+
       receiveDetailCount += 1;
 
       const builtItems = buildReceiveDetailItems({
@@ -175,6 +253,7 @@ export const createReceive = async (req, res) => {
       });
 
       const detailItems = builtItems.items;
+
       autoSerialRunning = builtItems.nextRunning;
 
       for (const item of detailItems) {
@@ -189,12 +268,27 @@ export const createReceive = async (req, res) => {
         const insertItem = buildInsertSql("tm_receive_detail_items", finalItem);
 
         await conn.query(insertItem.sql, insertItem.values);
+
         receiveItemCount += 1;
       }
     }
 
-    await insertCreateReceiveSerials(conn, receiveId);
+    /*
+    |--------------------------------------------------------------------------
+    | 5. รวมข้อมูลลง tm_receive_serials
+    |--------------------------------------------------------------------------
+    | receive_business_id = receiveId
+    | source_type = WEB
+    | customer_type = BUSINESS
+    |--------------------------------------------------------------------------
+    */
+    await insertCreateReceiveSerials(conn, receiveId, "WEB");
 
+    /*
+    |--------------------------------------------------------------------------
+    | 6. ยืนยันข้อมูลทั้งหมด
+    |--------------------------------------------------------------------------
+    */
     await conn.commit();
     transactionStarted = false;
 

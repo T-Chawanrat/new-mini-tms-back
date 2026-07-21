@@ -22,6 +22,8 @@ import {
   buildImportDetailItemData,
   createActiveSerialOrThrow,
   getPackageByCode,
+  insertImportReceiveReference,
+  insertImportReceiveStatus,
   insertImportReceiveSerials,
 } from "../utils/receiveImportUtils.js";
 
@@ -146,6 +148,18 @@ export const importReceivesFromExcel = async (req, res) => {
 
       const receiveId = headResult.insertId;
 
+      await insertImportReceiveReference({
+        conn,
+        referenceNo: firstRow.reference_no,
+        receiveId,
+      });
+
+      await insertImportReceiveStatus({
+        conn,
+        receiveId,
+        receiveCode,
+      });
+
       for (const row of billRows) {
         const packageData = await getPackageByCode({
           conn,
@@ -257,9 +271,7 @@ export const validateReceiveImportRows = async (req, res) => {
       });
     }
 
-    const rows = inputRows
-      .map((row, index) => normalizeImportRow(row, index))
-      .filter((row) => !isEmptyImportRow(row));
+    const rows = inputRows.map((row, index) => normalizeImportRow(row, index)).filter((row) => !isEmptyImportRow(row));
 
     const invalidRows = {};
 
@@ -298,77 +310,36 @@ export const validateReceiveImportRows = async (req, res) => {
         addError(index, "subdistrict_id", "ไม่มี subdistrict_id");
       } else {
         try {
-          const recipientAddress = await getMasterAddressBySubdistrictId(
-            conn,
-            subdistrictId,
-            addressCache
-          );
+          const recipientAddress = await getMasterAddressBySubdistrictId(conn, subdistrictId, addressCache);
 
           const masterSubdistrict = normalizeCompare(
-            pickAddressValue(recipientAddress, [
-              "subdistrict_name",
-              "subdistrict",
-              "SUBDISTRICT_NAME",
-              "SUBDISTRICT",
-              "name_th",
-            ])
+            pickAddressValue(recipientAddress, ["subdistrict_name", "subdistrict", "SUBDISTRICT_NAME", "SUBDISTRICT", "name_th"]),
           );
 
           const masterDistrict = normalizeCompare(
-            pickAddressValue(recipientAddress, [
-              "district_name",
-              "district",
-              "DISTRICT_NAME",
-              "DISTRICT",
-              "amphur_name",
-            ])
+            pickAddressValue(recipientAddress, ["district_name", "district", "DISTRICT_NAME", "DISTRICT", "amphur_name"]),
           );
 
-          const masterProvince = normalizeCompare(
-            pickAddressValue(recipientAddress, [
-              "province_name",
-              "province",
-              "PROVINCE_NAME",
-              "PROVINCE",
-            ])
-          );
+          const masterProvince = normalizeCompare(pickAddressValue(recipientAddress, ["province_name", "province", "PROVINCE_NAME", "PROVINCE"]));
 
-          const masterZipcode = normalizeCompare(
-            pickAddressValue(recipientAddress, [
-              "zipcode",
-              "zip_code",
-              "ZIPCODE",
-              "ZIP_CODE",
-              "postcode",
-            ])
-          );
+          const masterZipcode = normalizeCompare(pickAddressValue(recipientAddress, ["zipcode", "zip_code", "ZIPCODE", "ZIP_CODE", "postcode"]));
 
           const excelSubdistrict = normalizeCompare(row.recipient_subdistrict);
           const excelDistrict = normalizeCompare(row.recipient_district);
           const excelProvince = normalizeCompare(row.recipient_province);
           const excelZipcode = normalizeCompare(row.recipient_zipcode);
 
-          const canCompareAddress =
-            masterSubdistrict ||
-            masterDistrict ||
-            masterProvince ||
-            masterZipcode;
+          const canCompareAddress = masterSubdistrict || masterDistrict || masterProvince || masterZipcode;
 
           const isAddressNotMatch =
             canCompareAddress &&
-            (
-              excelSubdistrict !== masterSubdistrict ||
+            (excelSubdistrict !== masterSubdistrict ||
               excelDistrict !== masterDistrict ||
               excelProvince !== masterProvince ||
-              excelZipcode !== masterZipcode
-            );
+              excelZipcode !== masterZipcode);
 
           if (isAddressNotMatch) {
-            addError(
-              index,
-              "address",
-              "ที่อยู่ไม่ตรงกับ subdistrict_id ในฐานข้อมูล"
-            );
+            addError(index, "address", "ที่อยู่ไม่ตรงกับ subdistrict_id ในฐานข้อมูล");
           }
         } catch (error) {
           addError(index, "subdistrict_id", error.message || "ไม่พบ subdistrict_id ในระบบ");

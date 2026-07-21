@@ -2,16 +2,7 @@
 
 import xlsx from "xlsx";
 import { randomUUID } from "crypto";
-import {
-  cleanDbText,
-  cleanCode,
-  toNumberOrNull,
-  toNumberOrZero,
-  toYN,
-  formatDateYYYYMMDD,
-  padNumber,
-  buildInsertSql,
-} from "./cleanText.js";
+import { cleanDbText, cleanCode, toNumberOrNull, toNumberOrZero, toYN, formatDateYYYYMMDD, padNumber, buildInsertSql } from "./cleanText.js";
 import { cleanTel } from "./cleanTel.js";
 
 export const createImportError = (message, statusCode = 400) => {
@@ -59,7 +50,11 @@ const normalizeYN = (value) => {
 };
 
 const isYN = (value, expected) => {
-  return String(value ?? "").trim().toUpperCase() === expected;
+  return (
+    String(value ?? "")
+      .trim()
+      .toUpperCase() === expected
+  );
 };
 
 const isValueInRange = (value, min, max) => {
@@ -157,20 +152,14 @@ export const parseExcelDate = (value) => {
   if (slashMatch) {
     const [, dd, mm, yyyy] = slashMatch;
 
-    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(
-      2,
-      "0",
-    )}`;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   }
 
   const dashMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (dashMatch) {
     const [, yyyy, mm, dd] = dashMatch;
 
-    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(
-      2,
-      "0",
-    )}`;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   }
 
   const parsed = new Date(text);
@@ -264,19 +253,13 @@ export const validateSameBillHeader = (rows) => {
   for (const row of rows) {
     for (const field of fields) {
       if (String(row[field] ?? "") !== String(first[field] ?? "")) {
-        throw createImportError(
-          `NO_BILL ${first.no_bill}: ข้อมูลหัวบิล field ${field} ไม่ตรงกันที่แถว ${row.row_no}`,
-        );
+        throw createImportError(`NO_BILL ${first.no_bill}: ข้อมูลหัวบิล field ${field} ไม่ตรงกันที่แถว ${row.row_no}`);
       }
     }
   }
 };
 
-export const getMasterAddressBySubdistrictId = async (
-  conn,
-  subdistrictId,
-  cache,
-) => {
+export const getMasterAddressBySubdistrictId = async (conn, subdistrictId, cache) => {
   const cleanSubdistrictId = toNumberOrNull(subdistrictId);
 
   if (!cleanSubdistrictId) {
@@ -321,12 +304,7 @@ export const getMasterAddressBySubdistrictId = async (
   return address;
 };
 
-export const getShipperByCustomerAndCode = async ({
-  conn,
-  customerId,
-  shipperCode,
-  cache,
-}) => {
+export const getShipperByCustomerAndCode = async ({ conn, customerId, shipperCode, cache }) => {
   const cleanCustomerId = toNumberOrNull(customerId);
   const cleanShipperCode = cleanCode(shipperCode);
 
@@ -399,11 +377,7 @@ const parseRunningCode = (code) => {
   };
 };
 
-export const buildNextImportReceiveCode = ({
-  prefix,
-  running,
-  runningLength,
-}) => {
+export const buildNextImportReceiveCode = ({ prefix, running, runningLength }) => {
   return `${prefix}${String(running).padStart(runningLength, "0")}`;
 };
 
@@ -461,11 +435,7 @@ export const generateFirstImportReceiveCode = async (conn, customerId) => {
   return `${prefix}${padNumber(nextRunning, 4)}`;
 };
 
-export const buildReceiveCodeMapByNoBill = async ({
-  conn,
-  customerId,
-  billGroups,
-}) => {
+export const buildReceiveCodeMapByNoBill = async ({ conn, customerId, billGroups }) => {
   const firstCode = await generateFirstImportReceiveCode(conn, customerId);
   const codeParts = parseRunningCode(firstCode);
 
@@ -485,12 +455,7 @@ export const buildReceiveCodeMapByNoBill = async ({
 };
 
 export const getRequestUserId = (req) => {
-  return toNumberOrNull(
-    req.user?.user_id ??
-      req.user?.id ??
-      req.user?.people_id ??
-      req.user?.employee_id,
-  );
+  return toNumberOrNull(req.user?.user_id ?? req.user?.id ?? req.user?.people_id ?? req.user?.employee_id);
 };
 
 export const createImportLog = async ({ conn, customerId, createdBy }) => {
@@ -516,12 +481,7 @@ export const createImportLog = async ({ conn, customerId, createdBy }) => {
   return result.insertId;
 };
 
-export const updateImportLogRunning = async ({
-  conn,
-  importId,
-  queueTotal,
-  updatedBy,
-}) => {
+export const updateImportLogRunning = async ({ conn, importId, queueTotal, updatedBy }) => {
   await conn.query(
     `
       UPDATE tm_receive_imports
@@ -535,13 +495,7 @@ export const updateImportLogRunning = async ({
   );
 };
 
-export const updateImportLogSuccess = async ({
-  conn,
-  importId,
-  queueTotal,
-  queueProcessed,
-  updatedBy,
-}) => {
+export const updateImportLogSuccess = async ({ conn, importId, queueTotal, queueProcessed, updatedBy }) => {
   await conn.query(
     `
       UPDATE tm_receive_imports
@@ -555,25 +509,11 @@ export const updateImportLogSuccess = async ({
         queue_finished_at = ?
       WHERE id = ?
     `,
-    [
-      new Date(),
-      updatedBy,
-      queueTotal,
-      queueProcessed,
-      new Date(),
-      importId,
-    ],
+    [new Date(), updatedBy, queueTotal, queueProcessed, new Date(), importId],
   );
 };
 
-export const updateImportLogFailed = async ({
-  conn,
-  importId,
-  queueTotal,
-  queueProcessed,
-  errorMessage,
-  updatedBy,
-}) => {
+export const updateImportLogFailed = async ({ conn, importId, queueTotal, queueProcessed, errorMessage, updatedBy }) => {
   if (!importId) return;
 
   await conn.query(
@@ -589,28 +529,11 @@ export const updateImportLogFailed = async ({
         queue_finished_at = ?
       WHERE id = ?
     `,
-    [
-      new Date(),
-      updatedBy,
-      queueTotal,
-      queueProcessed,
-      errorMessage,
-      new Date(),
-      importId,
-    ],
+    [new Date(), updatedBy, queueTotal, queueProcessed, errorMessage, new Date(), importId],
   );
 };
 
-export const buildImportHeadData = ({
-  row,
-  customerId,
-  shipper,
-  receiveCode,
-  recipientAddress,
-  shipperAddress,
-  importDate,
-  importId,
-}) => {
+export const buildImportHeadData = ({ row, customerId, shipper, receiveCode, recipientAddress, shipperAddress, importDate, importId }) => {
   const deliveryDate = parseExcelDate(row.send_date);
 
   if (!deliveryDate) {
@@ -724,14 +647,7 @@ const findMatchedPackageBusiness = ({ businessRows, q, weight }) => {
   };
 };
 
-export const getPackageByCode = async ({
-  conn,
-  customerId,
-  packageCode,
-  q,
-  weight,
-  cache,
-}) => {
+export const getPackageByCode = async ({ conn, customerId, packageCode, q, weight, cache }) => {
   const cleanCustomerId = toNumberOrNull(customerId);
   const cleanPackageCode = cleanCode(packageCode);
 
@@ -788,9 +704,7 @@ export const getPackageByCode = async ({
     );
 
     if (rows.length === 0) {
-      throw createImportError(
-        `ไม่พบ PACKAGE_CODE ${cleanPackageCode} ของ customer นี้ หรือ package ไม่ active`,
-      );
+      throw createImportError(`ไม่พบ PACKAGE_CODE ${cleanPackageCode} ของ customer นี้ หรือ package ไม่ active`);
     }
 
     packageRows = rows;
@@ -804,9 +718,7 @@ export const getPackageByCode = async ({
   });
 
   if (!matched) {
-    throw createImportError(
-      `PACKAGE_CODE ${cleanPackageCode}: ไม่พบเรทราคาที่ตรงกับ Q=${q ?? "-"} / WEIGHT=${weight ?? "-"}`,
-    );
+    throw createImportError(`PACKAGE_CODE ${cleanPackageCode}: ไม่พบเรทราคาที่ตรงกับ Q=${q ?? "-"} / WEIGHT=${weight ?? "-"}`);
   }
 
   const selected = matched.selectedRow;
@@ -832,10 +744,7 @@ export const getPackageByCode = async ({
     weight_min: selected.weight_min,
     weight_max: selected.weight_max,
 
-    is_document_return:
-      selected.detail_is_document_return ??
-      selected.package_is_document_return ??
-      null,
+    is_document_return: selected.detail_is_document_return ?? selected.package_is_document_return ?? null,
   };
 };
 
@@ -872,10 +781,7 @@ export const buildImportDetailData = ({ receiveId, row, packageData }) => {
   };
 };
 
-export const buildImportDetailItemData = ({
-  receiveDetailId,
-  productSerial,
-}) => {
+export const buildImportDetailItemData = ({ receiveDetailId, productSerial }) => {
   if (!productSerial) return null;
 
   return {
@@ -931,6 +837,49 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
 
     throw error;
   }
+};
+
+export const insertImportReceiveReference = async ({ conn, referenceNo, receiveId }) => {
+  const cleanReceiveId = toNumberOrNull(receiveId);
+
+  if (!cleanReceiveId) {
+    throw createImportError("receive_id required for tm_receive_references");
+  }
+
+  const data = {
+    reference_no: cleanOptionalCode(referenceNo),
+    receive_id: cleanReceiveId,
+  };
+
+  const { sql, values } = buildInsertSql("tm_receive_references", data);
+
+  await conn.query(sql, values);
+};
+
+export const insertImportReceiveStatus = async ({ conn, receiveId, receiveCode }) => {
+  const cleanReceiveId = toNumberOrNull(receiveId);
+  const cleanReceiveCode = cleanCode(receiveCode);
+
+  if (!cleanReceiveId) {
+    throw createImportError("receive_id required for tm_receive_status");
+  }
+
+  if (!cleanReceiveCode) {
+    throw createImportError("receive_code required for tm_receive_status");
+  }
+
+  const data = {
+    receive_walkin_id: null,
+    receive_business_id: cleanReceiveId,
+    receive_code: cleanReceiveCode,
+    status_id: 1,
+    datetime: new Date(),
+    status: "รับเข้าระบบ",
+  };
+
+  const { sql, values } = buildInsertSql("tm_receive_status", data);
+
+  await conn.query(sql, values);
 };
 
 export const insertImportReceiveSerials = async (conn, receiveId) => {
@@ -1006,6 +955,7 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         size_type,
 
         last_modified,
+        source_type,
         customer_type
       )
       SELECT
@@ -1072,6 +1022,7 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         d.size_type,
 
          NOW() AS last_modified,
+         'IMPORT' AS source_type,
         'BUSINESS' AS customer_type
       FROM tm_receive_import_head h
       INNER JOIN tm_receive_import_details d

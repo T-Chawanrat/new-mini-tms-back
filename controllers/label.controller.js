@@ -339,6 +339,15 @@ export const getLabelSerials = async (req, res) => {
         rs.serial_id,
         rs.serial_no,
 
+        ROW_NUMBER() OVER (
+          PARTITION BY rs.receive_code
+          ORDER BY rs.serial_no ASC
+        ) AS serial_index,
+
+        COUNT(*) OVER (
+          PARTITION BY rs.receive_code
+        ) AS serial_total,
+
         rs.customer_id,
         c.name AS customer_name,
 

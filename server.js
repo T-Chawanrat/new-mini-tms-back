@@ -22,6 +22,7 @@ import holidayRoutes from "./routes/holiday.routes.js";
 import receiveReportRoute from "./routes/receive.report.route.js";
 import labelRoute from "./routes/label.route.js";
 import warehouseReceiveRoutes from "./routes/warehouse.receive.routes.js";
+import truckLoadRoutes from "./routes/truck.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,6 +58,7 @@ app.use("/holidays", holidayRoutes);
 app.use("/receive-report", receiveReportRoute);
 app.use("/labels", labelRoute);
 app.use("/warehouse-receives", warehouseReceiveRoutes);
+app.use("/truck-loads", truckLoadRoutes);
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

@@ -2,12 +2,19 @@ import db from "../config/db.js";
 // import { importSTDService } from "../services/import/importSTD.service.js";
 import { formatDateOnly } from "../utils/formatDate.js";
 import { cleanTel } from "../utils/cleanTel.js";
+import {
+  cleanCode,
+  cleanDbText,
+  toNumberOrNull,
+} from "../utils/cleanText.js";
 
 export const importSTD = async (req, res) => {
   let connection;
 
   try {
-    if (!req.user) return res.status(401).json({ message: "unauthorized" });
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
 
     const { rows, file_name, customer_id } = req.body;
     const { id: userId } = req.user;
@@ -15,11 +22,15 @@ export const importSTD = async (req, res) => {
     const customerIdValue = Number(customer_id);
 
     if (!customerIdValue) {
-      return res.status(400).json({ message: "กรุณาเลือกลูกค้า" });
+      return res.status(400).json({
+        message: "กรุณาเลือกลูกค้า",
+      });
     }
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ message: "no rows" });
+      return res.status(400).json({
+        message: "no rows",
+      });
     }
 
     console.log("IMPORT BODY =", {
@@ -33,10 +44,25 @@ export const importSTD = async (req, res) => {
 
     // ===== CREATE LOG =====
     const [logResult] = await connection.query(
-      `INSERT INTO logs_imports 
-      (user_id, customer_id, import_type, input_type, file_name, total_rows, success_rows, failed_rows)
-      VALUES (?, ?, 'STD', 'EXCEL', ?, ?, 0, 0)`,
-      [userId, customerIdValue, file_name || null, rows.length],
+      `
+        INSERT INTO logs_imports (
+          user_id,
+          customer_id,
+          import_type,
+          input_type,
+          file_name,
+          total_rows,
+          success_rows,
+          failed_rows
+        )
+        VALUES (?, ?, 'STD', 'EXCEL', ?, ?, 0, 0)
+      `,
+      [
+        userId,
+        customerIdValue,
+        file_name || null,
+        rows.length,
+      ],
     );
 
     const importLogId = logResult.insertId;
@@ -47,50 +73,63 @@ export const importSTD = async (req, res) => {
 
     // ===== LOAD ADDRESS MAPPING =====
     const [addrRows] = await connection.query(
-      `SELECT subdistrict_id, warehouse_id FROM mm_master_addresses`,
+      `
+        SELECT
+          subdistrict_id,
+          warehouse_id
+        FROM mm_master_addresses
+      `,
     );
 
     // map: subdistrict_id → to_warehouse
     const subdistrictMap = {};
+
     addrRows.forEach((r) => {
       subdistrictMap[r.subdistrict_id] = r.warehouse_id;
     });
 
     rows.forEach((r, index) => {
       if (!r.SERIAL_NO) {
-        return errorLogs.push([
+        errorLogs.push([
           importLogId,
           index + 1,
           "REQUIRED_SERIAL",
           "SERIAL_NO is required",
           JSON.stringify(r),
         ]);
+
+        return;
       }
 
       const tel = cleanTel(r.RECIPIENT_TEL);
 
       if (tel && !/^\d{9,10}$/.test(tel)) {
-        return errorLogs.push([
+        errorLogs.push([
           importLogId,
           index + 1,
           "INVALID_TEL",
           "เบอร์โทรไม่ถูกต้อง",
           JSON.stringify(r),
         ]);
+
+        return;
       }
 
       if (!subdistrictMap[r.subdistrict_id]) {
-        return errorLogs.push([
+        errorLogs.push([
           importLogId,
           index + 1,
           "INVALID_SUBDISTRICT",
           "ไม่พบ subdistrict_id ใน master",
           JSON.stringify(r),
         ]);
+
+        return;
       }
 
       const fromWarehouse = null;
-      const toWarehouse = subdistrictMap[r.subdistrict_id] || null;
+      const toWarehouse =
+        subdistrictMap[r.subdistrict_id] || null;
 
       values.push([
         r.NO_BILL || null,
@@ -147,60 +186,75 @@ export const importSTD = async (req, res) => {
       const chunk = values.slice(i, i + chunkSize);
 
       const [result] = await connection.query(
-        `INSERT INTO shipments (
-          no_bill,
-          serial_no,
-          receive_code,
-          reference,
-          send_date,
-          customer_id,
-          shipper_code,
-          shipper_id,
-          recipient_code,
-          recipient_id,
-          recipient_name,
-          recipient_tel,
-          address,
-          subdistrict,
-          district,
-          province,
-          zipcode,
-          subdistrict_id,
-          from_warehouse,
-          to_warehouse,
-          package_code,
-          package_id,
-          weight,
-          width,
-          height,
-          length,
-          q,
-          price,
-          import_log_id,
-          current_status_id,
-          import_type,
-          source_id,
-          created_by
-        ) VALUES ?`,
+        `
+          INSERT INTO shipments (
+            no_bill,
+            serial_no,
+            receive_code,
+            reference,
+            send_date,
+            customer_id,
+            shipper_code,
+            shipper_id,
+            recipient_code,
+            recipient_id,
+            recipient_name,
+            recipient_tel,
+            address,
+            subdistrict,
+            district,
+            province,
+            zipcode,
+            subdistrict_id,
+            from_warehouse,
+            to_warehouse,
+            package_code,
+            package_id,
+            weight,
+            width,
+            height,
+            length,
+            q,
+            price,
+            import_log_id,
+            current_status_id,
+            import_type,
+            source_id,
+            created_by
+          )
+          VALUES ?
+        `,
         [chunk],
       );
 
-      if (!insertIdStart) insertIdStart = result.insertId;
+      if (!insertIdStart) {
+        insertIdStart = result.insertId;
+      }
+
       totalInserted += result.affectedRows;
     }
 
     // ===== STATUS LOG =====
     if (totalInserted) {
       const [rows] = await connection.query(
-        `SELECT id, to_warehouse 
-         FROM shipments 
-         WHERE import_log_id = ?
-         ORDER BY id`,
+        `
+          SELECT
+            id,
+            to_warehouse
+          FROM shipments
+          WHERE import_log_id = ?
+          ORDER BY id
+        `,
         [importLogId],
       );
 
       const [[status]] = await connection.query(
-        `SELECT id FROM mm_status WHERE name = 'รับเข้าระบบ' LIMIT 1`,
+        `
+          SELECT id
+          FROM mm_status
+          WHERE name = 'รับเข้าระบบ'
+          LIMIT 1
+        `,
       );
 
       const IMPORT_STATUS_ID = status.id;
@@ -213,8 +267,15 @@ export const importSTD = async (req, res) => {
       ]);
 
       await connection.query(
-        `INSERT INTO logs_shipment_status 
-         (shipment_id, status_id, warehouse_id, user_id) VALUES ?`,
+        `
+          INSERT INTO logs_shipment_status (
+            shipment_id,
+            status_id,
+            warehouse_id,
+            user_id
+          )
+          VALUES ?
+        `,
         [statusLogs],
       );
     }
@@ -222,17 +283,34 @@ export const importSTD = async (req, res) => {
     // ===== ERROR LOG =====
     if (errorLogs.length) {
       await connection.query(
-        `INSERT INTO logs_import_errors 
-        (import_log_id, row_no, error_code, error_message, raw_data) VALUES ?`,
+        `
+          INSERT INTO logs_import_errors (
+            import_log_id,
+            row_no,
+            error_code,
+            error_message,
+            raw_data
+          )
+          VALUES ?
+        `,
         [errorLogs],
       );
     }
 
     // ===== SUMMARY =====
     await connection.query(
-      `UPDATE logs_imports 
-       SET success_rows = ?, failed_rows = ? WHERE id = ?`,
-      [totalInserted, errorLogs.length, importLogId],
+      `
+        UPDATE logs_imports
+        SET
+          success_rows = ?,
+          failed_rows = ?
+        WHERE id = ?
+      `,
+      [
+        totalInserted,
+        errorLogs.length,
+        importLogId,
+      ],
     );
 
     await connection.commit();
@@ -254,7 +332,9 @@ export const importSTD = async (req, res) => {
       connection.release();
     }
 
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      message: err.message,
+    });
   }
 };
 
@@ -263,14 +343,23 @@ export const manual = async (req, res) => {
 
   try {
     if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
+      return res.status(401).json({
+        message: "unauthorized",
+      });
     }
 
     const { rows, file_name } = req.body;
-    const { id: userId, role_id: roleId, customer_id: tokenCustomerId } = req.user;
+
+    const {
+      id: userId,
+      role_id: roleId,
+      customer_id: tokenCustomerId,
+    } = req.user;
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ message: "no rows" });
+      return res.status(400).json({
+        message: "no rows",
+      });
     }
 
     connection = await db.getConnection();
@@ -279,22 +368,24 @@ export const manual = async (req, res) => {
     // ===== CREATE IMPORT LOG =====
     const [logResult] = await connection.query(
       `
-      INSERT INTO logs_imports (
-        user_id,
-        customer_id,
-        import_type,
-        input_type,
-        file_name,
-        total_rows,
-        success_rows,
-        failed_rows
-      )
-      VALUES (?, ?, 'STD', 'MANUAL', ?, ?, 0, 0)
+        INSERT INTO logs_imports (
+          user_id,
+          customer_id,
+          import_type,
+          input_type,
+          file_name,
+          total_rows,
+          success_rows,
+          failed_rows
+        )
+        VALUES (?, ?, 'STD', 'MANUAL', ?, ?, 0, 0)
       `,
       [
         userId,
-        roleId === 2 ? tokenCustomerId : null,
-        file_name || "manual-input",
+        Number(roleId) === 2
+          ? toNumberOrNull(tokenCustomerId)
+          : null,
+        cleanDbText(file_name) || "manual-input",
         rows.length,
       ],
     );
@@ -304,28 +395,34 @@ export const manual = async (req, res) => {
     // ===== LOAD ADDRESS MAP =====
     const [addrRows] = await connection.query(
       `
-      SELECT subdistrict_id, warehouse_id
-      FROM mm_master_addresses
+        SELECT
+          subdistrict_id,
+          warehouse_id
+        FROM mm_master_addresses
       `,
     );
 
     const subdistrictMap = {};
+
     addrRows.forEach((r) => {
-      subdistrictMap[String(r.subdistrict_id)] = r.warehouse_id;
+      subdistrictMap[String(r.subdistrict_id)] =
+        r.warehouse_id;
     });
 
     // ===== LOAD STATUS =====
     const [[statusRow]] = await connection.query(
       `
-      SELECT id
-      FROM mm_status
-      WHERE name = 'รับเข้าระบบ'
-      LIMIT 1
+        SELECT id
+        FROM mm_status
+        WHERE name = 'รับเข้าระบบ'
+        LIMIT 1
       `,
     );
 
     if (!statusRow) {
-      throw new Error("ไม่พบสถานะ รับเข้าระบบ ใน mm_status");
+      throw new Error(
+        "ไม่พบสถานะ รับเข้าระบบ ใน mm_status",
+      );
     }
 
     const importStatusId = statusRow.id;
@@ -336,20 +433,27 @@ export const manual = async (req, res) => {
     rows.forEach((r, index) => {
       const rowNo = index + 1;
 
-      const serialNo = (r.serial_no || "").toString().trim();
-      const reference = (r.reference || "").toString().trim();
+      const serialNo = cleanDbText(r.serial_no);
+      const reference = cleanDbText(r.reference);
       const sendDate = formatDateOnly(r.send_date);
 
-      const recipientName = (r.recipient_name || "").toString().trim();
-      const recipientTel = cleanTel(r.recipient_tel);
+      const recipientName = cleanDbText(
+        r.recipient_name,
+      );
 
-      const address = (r.address || "").toString().trim();
-      const subdistrict = (r.subdistrict || "").toString().trim();
-      const district = (r.district || "").toString().trim();
-      const province = (r.province || "").toString().trim();
-      const zipcode = (r.zipcode || "").toString().trim();
+      const recipientTel = cleanTel(
+        r.recipient_tel,
+      );
 
-      const subdistrictId = r.subdistrict_id ? String(r.subdistrict_id) : "";
+      const address = cleanDbText(r.address);
+      const subdistrict = cleanDbText(r.subdistrict);
+      const district = cleanDbText(r.district);
+      const province = cleanDbText(r.province);
+      const zipcode = cleanDbText(r.zipcode);
+
+      const subdistrictId = cleanDbText(
+        r.subdistrict_id,
+      );
 
       if (!serialNo) {
         errorLogs.push([
@@ -359,6 +463,7 @@ export const manual = async (req, res) => {
           "serial_no is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
@@ -370,6 +475,7 @@ export const manual = async (req, res) => {
           "reference is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
@@ -381,6 +487,7 @@ export const manual = async (req, res) => {
           "send_date is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
@@ -392,6 +499,7 @@ export const manual = async (req, res) => {
           "recipient_name is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
@@ -403,6 +511,7 @@ export const manual = async (req, res) => {
           "recipient_tel is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
@@ -414,10 +523,17 @@ export const manual = async (req, res) => {
           "เบอร์โทรไม่ถูกต้อง",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
-      if (!address || !subdistrict || !district || !province || !zipcode) {
+      if (
+        !address ||
+        !subdistrict ||
+        !district ||
+        !province ||
+        !zipcode
+      ) {
         errorLogs.push([
           importLogId,
           rowNo,
@@ -425,10 +541,14 @@ export const manual = async (req, res) => {
           "address is required",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
-      if (!subdistrictId || !subdistrictMap[subdistrictId]) {
+      if (
+        !subdistrictId ||
+        !subdistrictMap[subdistrictId]
+      ) {
         errorLogs.push([
           importLogId,
           rowNo,
@@ -436,15 +556,23 @@ export const manual = async (req, res) => {
           "ไม่พบ subdistrict_id ใน master",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
       const fromWarehouse = null;
-      const toWarehouse = subdistrictMap[subdistrictId];
+      const toWarehouse =
+        subdistrictMap[subdistrictId];
 
-      const rowCustomerId = Number(roleId) === 2 ? tokenCustomerId : r.customer_id || null;
+      const rowCustomerId =
+        Number(roleId) === 2
+          ? toNumberOrNull(tokenCustomerId)
+          : toNumberOrNull(r.customer_id);
 
-      if (Number(roleId) === 2 && !tokenCustomerId) {
+      if (
+        Number(roleId) === 2 &&
+        !tokenCustomerId
+      ) {
         errorLogs.push([
           importLogId,
           rowNo,
@@ -452,20 +580,21 @@ export const manual = async (req, res) => {
           "customer_id missing from token",
           JSON.stringify(r),
         ]);
+
         return;
       }
 
       values.push([
-        r.no_bill || null,
+        cleanDbText(r.no_bill),
         serialNo,
-        r.receive_code || null,
+        cleanCode(r.receive_code),
         reference,
         sendDate,
 
         rowCustomerId,
 
-        r.shipper_code || null,
-        r.recipient_code || null,
+        cleanCode(r.shipper_code),
+        cleanCode(r.recipient_code),
         recipientName,
         recipientTel,
 
@@ -479,12 +608,12 @@ export const manual = async (req, res) => {
         fromWarehouse,
         toWarehouse,
 
-        r.package_code || null,
-        r.weight ? Number(r.weight) : null,
-        r.width ? Number(r.width) : null,
-        r.height ? Number(r.height) : null,
-        r.length ? Number(r.length) : null,
-        r.q ? Number(r.q) : null,
+        cleanCode(r.package_code),
+        toNumberOrNull(r.weight),
+        toNumberOrNull(r.width),
+        toNumberOrNull(r.height),
+        toNumberOrNull(r.length),
+        toNumberOrNull(r.q),
 
         importLogId,
         importStatusId,
@@ -498,42 +627,50 @@ export const manual = async (req, res) => {
     const chunkSize = 500;
     let totalInserted = 0;
 
-    for (let i = 0; i < values.length; i += chunkSize) {
-      const chunk = values.slice(i, i + chunkSize);
+    for (
+      let i = 0;
+      i < values.length;
+      i += chunkSize
+    ) {
+      const chunk = values.slice(
+        i,
+        i + chunkSize,
+      );
 
       const [result] = await connection.query(
         `
-        INSERT INTO shipments (
-          no_bill,
-          serial_no,
-          receive_code,
-          reference,
-          send_date,
-          customer_id,
-          shipper_code,
-          recipient_code,
-          recipient_name,
-          recipient_tel,
-          address,
-          subdistrict,
-          district,
-          province,
-          zipcode,
-          subdistrict_id,
-          from_warehouse,
-          to_warehouse,
-          package_code,
-          weight,
-          width,
-          height,
-          length,
-          q,
-          import_log_id,
-          current_status_id,
-          import_type,
-          source_id,
-          created_by
-        ) VALUES ?
+          INSERT INTO shipments (
+            no_bill,
+            serial_no,
+            receive_code,
+            reference,
+            send_date,
+            customer_id,
+            shipper_code,
+            recipient_code,
+            recipient_name,
+            recipient_tel,
+            address,
+            subdistrict,
+            district,
+            province,
+            zipcode,
+            subdistrict_id,
+            from_warehouse,
+            to_warehouse,
+            package_code,
+            weight,
+            width,
+            height,
+            length,
+            q,
+            import_log_id,
+            current_status_id,
+            import_type,
+            source_id,
+            created_by
+          )
+          VALUES ?
         `,
         [chunk],
       );
@@ -543,32 +680,38 @@ export const manual = async (req, res) => {
 
     // ===== STATUS LOG =====
     if (totalInserted > 0) {
-      const [shipmentRows] = await connection.query(
-        `
-        SELECT id, to_warehouse
-        FROM shipments
-        WHERE import_log_id = ?
-        ORDER BY id
-        `,
-        [importLogId],
-      );
+      const [shipmentRows] =
+        await connection.query(
+          `
+            SELECT
+              id,
+              to_warehouse
+            FROM shipments
+            WHERE import_log_id = ?
+            ORDER BY id
+          `,
+          [importLogId],
+        );
 
-      const statusLogs = shipmentRows.map((s) => [
-        s.id,
-        importStatusId,
-        s.to_warehouse,
-        userId,
-      ]);
+      const statusLogs = shipmentRows.map(
+        (shipment) => [
+          shipment.id,
+          importStatusId,
+          shipment.to_warehouse,
+          userId,
+        ],
+      );
 
       if (statusLogs.length > 0) {
         await connection.query(
           `
-          INSERT INTO logs_shipment_status (
-            shipment_id,
-            status_id,
-            warehouse_id,
-            user_id
-          ) VALUES ?
+            INSERT INTO logs_shipment_status (
+              shipment_id,
+              status_id,
+              warehouse_id,
+              user_id
+            )
+            VALUES ?
           `,
           [statusLogs],
         );
@@ -579,13 +722,14 @@ export const manual = async (req, res) => {
     if (errorLogs.length > 0) {
       await connection.query(
         `
-        INSERT INTO logs_import_errors (
-          import_log_id,
-          row_no,
-          error_code,
-          error_message,
-          raw_data
-        ) VALUES ?
+          INSERT INTO logs_import_errors (
+            import_log_id,
+            row_no,
+            error_code,
+            error_message,
+            raw_data
+          )
+          VALUES ?
         `,
         [errorLogs],
       );
@@ -594,11 +738,17 @@ export const manual = async (req, res) => {
     // ===== UPDATE IMPORT SUMMARY =====
     await connection.query(
       `
-      UPDATE logs_imports
-      SET success_rows = ?, failed_rows = ?
-      WHERE id = ?
+        UPDATE logs_imports
+        SET
+          success_rows = ?,
+          failed_rows = ?
+        WHERE id = ?
       `,
-      [totalInserted, errorLogs.length, importLogId],
+      [
+        totalInserted,
+        errorLogs.length,
+        importLogId,
+      ],
     );
 
     await connection.commit();
@@ -620,6 +770,8 @@ export const manual = async (req, res) => {
       connection.release();
     }
 
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      message: err.message,
+    });
   }
 };

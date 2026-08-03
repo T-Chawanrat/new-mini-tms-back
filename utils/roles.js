@@ -10,4 +10,5 @@ export const ROLES = {
   9: "HR",
   10: "IT",
   11: "SUPERADMIN",
+  12: "DUMMY",
 };

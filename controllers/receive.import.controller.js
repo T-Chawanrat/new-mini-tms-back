@@ -25,7 +25,9 @@ import {
   insertImportReceiveReference,
   insertImportReceiveStatus,
   insertImportReceiveSerials,
+  insertImportProductTransactions,
 } from "../utils/receiveImportUtils.js";
+import { insertReceiveCreationLog } from "../utils/receiveCreationLogUtils.js";
 
 export const importReceivesFromExcel = async (req, res) => {
   const conn = await db.getConnection();
@@ -197,6 +199,24 @@ export const importReceivesFromExcel = async (req, res) => {
       }
 
       await insertImportReceiveSerials(conn, receiveId);
+
+      await insertImportProductTransactions({
+        conn,
+        receiveId,
+        createdBy: userId,
+      });
+
+      await insertReceiveCreationLog({
+        conn,
+        receiveId,
+        receiveCode,
+        customerId,
+        sourceType: "IMPORT",
+        sourceImportId: importId,
+        detailCount: billRows.length,
+        itemCount: billRows.filter((row) => row.serial_no).length,
+        createdBy: userId,
+      });
 
       queueProcessed += 1;
     }

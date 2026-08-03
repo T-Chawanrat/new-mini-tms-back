@@ -10,10 +10,14 @@ import {
   getVehicleTypes,
   getReceivePayments,
   getReceiveDeliveryTypes,
+  getDriverUsers,
+  getActiveVehicles,
 } from "../controllers/filter.controller.js";
 
 const router = express.Router();
 router.get("/roles", getRoles);
+router.get("/driver-users", getDriverUsers);
+router.get("/vehicles", getActiveVehicles);
 router.get("/customers", getCustomers);
 router.get("/warehouses", getWarehouses);
 router.get("/zones", getZones);

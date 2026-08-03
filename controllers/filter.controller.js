@@ -18,6 +18,66 @@ export const getRoles = async (req, res) => {
   }
 };
 
+export const getDriverUsers = async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        id,
+        employee_code,
+        first_name,
+        last_name
+      FROM um_users
+      WHERE role_id = 7
+      ORDER BY first_name ASC, last_name ASC
+    `;
+
+    const [rows] = await db.query(sql);
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error("getDriverUsers error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "ไม่สามารถโหลดรายชื่อพนักงานขับรถได้",
+      error: error.message,
+    });
+  }
+};
+
+export const getActiveVehicles = async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        id,
+        license_plate,
+        license_province,
+        model
+      FROM mm_vehicles
+      WHERE status = 'ACTIVE'
+      ORDER BY license_plate ASC
+    `;
+
+    const [rows] = await db.query(sql);
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error("getActiveVehicles error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "ไม่สามารถโหลดรายการรถได้",
+      error: error.message,
+    });
+  }
+};
+
 export const getCustomers = async (req, res) => {
   try {
     const { search } = req.query;

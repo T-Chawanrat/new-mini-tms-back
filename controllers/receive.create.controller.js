@@ -13,7 +13,9 @@ import {
   buildReceiveDetailItems,
   createActiveSerialOrThrow,
   insertCreateReceiveSerials,
+  insertCreateProductTransactions,
 } from "../utils/receiveUtils.js";
+import { insertReceiveCreationLog } from "../utils/receiveCreationLogUtils.js";
 
 export const createReceive = async (req, res) => {
   const conn = await db.getConnection();
@@ -27,6 +29,7 @@ export const createReceive = async (req, res) => {
     }
 
     const isCustomer = Number(req.user.role_id) === 2;
+    const userId = toNumberOrNull(req.user.user_id ?? req.user.id ?? req.user.people_id ?? req.user.employee_id);
 
     const body = req.body || {};
     const receiveHeader = body.receiveHeader || body;
@@ -164,7 +167,7 @@ export const createReceive = async (req, res) => {
       cost: totalCost,
       net: totalCost,
 
-      update_by_user_id: req.user.user_id || req.user.id || null,
+      update_by_user_id: userId,
 
       updated_at: new Date(),
     };
@@ -283,6 +286,23 @@ export const createReceive = async (req, res) => {
     |--------------------------------------------------------------------------
     */
     await insertCreateReceiveSerials(conn, receiveId, "WEB");
+
+    await insertCreateProductTransactions({
+      conn,
+      receiveId,
+      createdBy: userId,
+    });
+
+    await insertReceiveCreationLog({
+      conn,
+      receiveId,
+      receiveCode,
+      customerId: finalCustomerId,
+      sourceType: "WEB",
+      detailCount: receiveDetailCount,
+      itemCount: receiveItemCount,
+      createdBy: userId,
+    });
 
     /*
     |--------------------------------------------------------------------------

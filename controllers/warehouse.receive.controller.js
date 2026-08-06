@@ -1,16 +1,11 @@
 import db from "../config/db.js";
-import {
-  cleanCode,
-  toNumberOrNull,
-} from "../utils/cleanText.js";
+import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
 import { formatDateOnly } from "../utils/formatDate.js";
 
 export const getWarehouseReceiveSerials = async (req, res) => {
   try {
     const customerId = toNumberOrNull(req.query.customer_id);
-    const toWarehouseId = toNumberOrNull(
-      req.query.to_warehouse_id,
-    );
+    const toWarehouseId = toNumberOrNull(req.query.to_warehouse_id);
 
     const where = [];
     const params = [];
@@ -47,11 +42,7 @@ export const getWarehouseReceiveSerials = async (req, res) => {
 
       WHERE NULLIF(TRIM(rs.serial_no), '') IS NOT NULL
 
-        ${
-          where.length
-            ? `AND ${where.join("\n        AND ")}`
-            : ""
-        }
+        ${where.length ? `AND ${where.join("\n        AND ")}` : ""}
 
       ORDER BY
         c.name ASC,
@@ -67,10 +58,7 @@ export const getWarehouseReceiveSerials = async (req, res) => {
       data: rows,
     });
   } catch (error) {
-    console.error(
-      "getWarehouseReceiveSerials error:",
-      error,
-    );
+    console.error("getWarehouseReceiveSerials error:", error);
 
     return res.status(500).json({
       success: false,
@@ -85,13 +73,7 @@ export const createWarehouseReceive = async (req, res) => {
 
   try {
     const serialNos = Array.isArray(req.body.serial_nos)
-      ? [
-          ...new Set(
-            req.body.serial_nos
-              .map((value) => cleanCode(value))
-              .filter((value) => value !== null),
-          ),
-        ]
+      ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter((value) => value !== null))]
       : [];
 
     if (!serialNos.length) {
@@ -124,24 +106,24 @@ export const createWarehouseReceive = async (req, res) => {
 
     const placeholders = serialNos.map(() => "?").join(", ");
 
+    /*
+     * ดึง Serial พร้อมคลังปลายทางจาก tm_receive_serials
+     */
     const [serialRows] = await connection.query(
       `
         SELECT DISTINCT
           rs.serial_id,
-          rs.serial_no
+          rs.serial_no,
+          rs.to_warehouse_id
         FROM tm_receive_serials rs
         WHERE rs.serial_no IN (${placeholders})
       `,
       serialNos,
     );
 
-    const foundSet = new Set(
-      serialRows.map((row) => String(row.serial_no ?? "").trim()),
-    );
+    const foundSet = new Set(serialRows.map((row) => String(row.serial_no ?? "").trim()));
 
-    const notFoundSerialNos = serialNos.filter(
-      (serialNo) => !foundSet.has(serialNo),
-    );
+    const notFoundSerialNos = serialNos.filter((serialNo) => !foundSet.has(serialNo));
 
     if (notFoundSerialNos.length > 0) {
       await connection.rollback();
@@ -153,6 +135,9 @@ export const createWarehouseReceive = async (req, res) => {
       });
     }
 
+    /*
+     * ตรวจสอบว่ารับเข้าคลังไปแล้วหรือยัง
+     */
     const [existingRows] = await connection.query(
       `
         SELECT DISTINCT
@@ -164,9 +149,7 @@ export const createWarehouseReceive = async (req, res) => {
     );
 
     if (existingRows.length > 0) {
-      const alreadyReceivedSerialNos = existingRows.map((row) =>
-        String(row.serial_no ?? "").trim(),
-      );
+      const alreadyReceivedSerialNos = existingRows.map((row) => String(row.serial_no ?? "").trim());
 
       await connection.rollback();
 
@@ -177,11 +160,15 @@ export const createWarehouseReceive = async (req, res) => {
       });
     }
 
+    /*
+     * now_warehouse_id = คลังปัจจุบันของผู้ใช้งาน
+     * to_warehouse_id  = คลังปลายทางจาก tm_receive_serials
+     */
     const values = serialRows.map((row) => [
       row.serial_id,
       row.serial_no,
       warehouseId,
-      null,
+      toNumberOrNull(row.to_warehouse_id),
       null,
       null,
       resendDate,
@@ -193,8 +180,8 @@ export const createWarehouseReceive = async (req, res) => {
         INSERT INTO tm_product_warehouses (
           serial_id,
           serial_no,
-          warehouse_id,
-          dst_warehouse_id,
+          now_warehouse_id,
+          to_warehouse_id,
           palette_id,
           route_id,
           resend_date,
@@ -205,6 +192,11 @@ export const createWarehouseReceive = async (req, res) => {
       [values],
     );
 
+    /*
+     * บันทึกประวัติ Transaction
+     * warehouse_id ตรงนี้ไม่ต้องเปลี่ยน เพราะเป็นคอลัมน์ของ
+     * tm_product_transactions ไม่ใช่ tm_product_warehouses
+     */
     await connection.query(
       `
         INSERT INTO tm_product_transactions (
@@ -260,7 +252,13 @@ export const createWarehouseReceive = async (req, res) => {
           rs.district_name,
           rs.subdistrict_name,
           rs.zip_code,
-          TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+          TRIM(
+            CONCAT_WS(
+              ' ',
+              NULLIF(actor.first_name, ''),
+              NULLIF(actor.last_name, '')
+            )
+          ),
           actor.username,
           NULL,
           actor.id,
@@ -271,31 +269,36 @@ export const createWarehouseReceive = async (req, res) => {
           YEAR(NOW()),
           CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
         FROM tm_receive_serials rs
+
         INNER JOIN um_users actor
           ON actor.id = ?
+
         LEFT JOIN mm_warehouses_to warehouse
           ON warehouse.warehouse_id = ?
+
         WHERE rs.serial_no IN (${placeholders})
       `,
-      [
-        warehouseId,
-        createdBy,
-        createdBy,
-        warehouseId,
-        ...serialNos,
-      ],
+      [warehouseId, createdBy, createdBy, warehouseId, ...serialNos],
     );
 
+    /*
+     * อัปเดต Transaction ล่าสุด
+     * warehouse_id ตรงนี้ก็ยังเป็นของ tm_product_transactions_last
+     */
     await connection.query(
       `
         UPDATE tm_product_transactions_last transaction_last
+
         INNER JOIN tm_receive_serials rs
           ON rs.serial_id = transaction_last.serial_id
           AND rs.serial_no = transaction_last.serial_no
+
         INNER JOIN um_users actor
           ON actor.id = ?
+
         LEFT JOIN mm_warehouses_to warehouse
           ON warehouse.warehouse_id = ?
+
         SET
           transaction_last.status_message = 'พัสดุถึงศูนย์',
           transaction_last.status_id = 4,
@@ -311,19 +314,18 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.subdistrict_name = rs.subdistrict_name,
           transaction_last.zip_code = rs.zip_code,
           transaction_last.created_name = TRIM(
-            CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))
+            CONCAT_WS(
+              ' ',
+              NULLIF(actor.first_name, ''),
+              NULLIF(actor.last_name, '')
+            )
           ),
           transaction_last.username = actor.username,
           transaction_last.user_id = actor.id
+
         WHERE rs.serial_no IN (${placeholders})
       `,
-      [
-        createdBy,
-        warehouseId,
-        warehouseId,
-        createdBy,
-        ...serialNos,
-      ],
+      [createdBy, warehouseId, warehouseId, createdBy, ...serialNos],
     );
 
     await connection.commit();
@@ -338,10 +340,7 @@ export const createWarehouseReceive = async (req, res) => {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error(
-          "createWarehouseReceive rollback error:",
-          rollbackError,
-        );
+        console.error("createWarehouseReceive rollback error:", rollbackError);
       }
     }
 

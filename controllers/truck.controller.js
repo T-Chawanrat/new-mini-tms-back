@@ -43,10 +43,10 @@ const TRUCK_SELECT_FIELDS = `
   t.id AS truck_load_id,
   t.truck_code,
   t.create_date,
-  t.customer_id,
   t.user_truck_id,
   t.driver_type,
   t.vehicle_id,
+  t.license_plate_province_id,
   t.status,
   t.warehouse_id,
   t.to_warehouse_id,
@@ -61,11 +61,13 @@ const TRUCK_SELECT_FIELDS = `
   t.is_arrived,
   t.arrived_by,
   t.arrived_datetime,
-  t.shipper_id,
-  t.recipient_id,
-  t.recipient_detail_id,
   t.note,
   t.sub_warehouse,
+  COALESCE(
+    truck_count.count_box,
+    (SELECT COUNT(*) FROM tm_truck_details detail_count WHERE detail_count.truck_load_id = t.id),
+    0
+  ) AS count_box,
 
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name,
@@ -93,8 +95,13 @@ const TRUCK_SELECT_FIELDS = `
     WHEN t.driver_type = 'CONTRACTOR' THEN t.license_plate
     ELSE COALESCE(vehicle.license_plate, t.license_plate)
   END AS license_plate,
-  vehicle.license_province,
-  vehicle.model
+  COALESCE(plate_province.province_name, vehicle.license_province) AS license_province,
+  vehicle.model,
+  COALESCE(
+    truck_count.count_box,
+    (SELECT COUNT(*) FROM tm_truck_details detail_count WHERE detail_count.truck_load_id = t.id),
+    0
+  ) AS serial_count
 `;
 
 const TRUCK_FROM_JOINS = `
@@ -107,6 +114,10 @@ const TRUCK_FROM_JOINS = `
     ON driver.id = t.user_truck_id
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = t.vehicle_id
+  LEFT JOIN mm_province plate_province
+    ON plate_province.id = t.license_plate_province_id
+  LEFT JOIN tm_truck_count truck_count
+    ON truck_count.truck_load_id = t.id
 `;
 
 const getTruckLoadRow = async (connection, truckLoadId) => {
@@ -123,6 +134,33 @@ const getTruckLoadRow = async (connection, truckLoadId) => {
   );
 
   return rows[0] || null;
+};
+
+const syncTruckBoxCount = async (connection, truckLoadId) => {
+  const [countRows] = await connection.query(
+    `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,
+    [truckLoadId],
+  );
+  const countBox = Number(countRows[0]?.count_box || 0);
+
+  const [existingRows] = await connection.query(
+    `SELECT id FROM tm_truck_count WHERE truck_load_id = ? LIMIT 1`,
+    [truckLoadId],
+  );
+
+  if (existingRows.length) {
+    await connection.query(
+      `UPDATE tm_truck_count SET count_box = ? WHERE id = ?`,
+      [countBox, existingRows[0].id],
+    );
+  } else {
+    await connection.query(
+      `INSERT INTO tm_truck_count (truck_load_id, count_box) VALUES (?, ?)`,
+      [truckLoadId, countBox],
+    );
+  }
+
+  return countBox;
 };
 
 const writeTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage }) => {
@@ -187,7 +225,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         truck.user_truck_id,
         truck.truck_code,
         truck.vehicle_id,
-        NULL,
+        plate_province.province_name,
         NULL,
         YEAR(NOW()),
         CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
@@ -198,6 +236,8 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON actor.id = ?
       LEFT JOIN mm_warehouses_to warehouse
         ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_province plate_province
+        ON plate_province.id = truck.license_plate_province_id
       LEFT JOIN tm_receive_serials rs
         ON rs.serial_id = product_truck.serial_id
         AND rs.serial_no = product_truck.serial_no
@@ -218,6 +258,8 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON actor.id = ?
       LEFT JOIN mm_warehouses_to warehouse
         ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_province plate_province
+        ON plate_province.id = truck.license_plate_province_id
       SET
         transaction_last.status_message = ?,
         transaction_last.status_id = ?,
@@ -232,7 +274,8 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.truck_license_plate = COALESCE(product_truck.truck_license_plate, truck.license_plate),
         transaction_last.user_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
-        transaction_last.truck_id = truck.vehicle_id
+        transaction_last.truck_id = truck.vehicle_id,
+        transaction_last.truck_province = plate_province.province_name
       WHERE product_truck.truck_load_id = ?
     `,
     [actorId, statusMessage, statusId, truckLoadId],
@@ -572,8 +615,7 @@ export const loadTruckProduct = async (req, res) => {
           pw.serial_id,
           COALESCE(NULLIF(TRIM(rs.serial_no), ''), pw.serial_no) AS serial_no,
           pw.resend_date,
-          rs.cost,
-          rs.customer_id
+          rs.cost
         FROM tm_product_warehouses pw
         LEFT JOIN tm_receive_serials rs
           ON rs.serial_id = pw.serial_id
@@ -620,13 +662,6 @@ export const loadTruckProduct = async (req, res) => {
       return res.status(409).json({ success: false, message: "Serial No นี้ถูกยิงขึ้นรถแล้ว" });
     }
 
-    if (product.customer_id) {
-      await connection.query(
-        `UPDATE tm_trucks SET customer_id = COALESCE(customer_id, ?) WHERE id = ?`,
-        [product.customer_id, truckLoadId],
-      );
-    }
-
     await connection.query(
       `
         INSERT INTO tm_product_trucks (
@@ -636,11 +671,12 @@ export const loadTruckProduct = async (req, res) => {
           driver_name,
           truck_id,
           truck_license_plate,
+          license_plate_province_id,
           resend_date,
           truck_load_id,
           created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         product.serial_id,
@@ -649,6 +685,7 @@ export const loadTruckProduct = async (req, res) => {
         truckLoad.driver_name,
         truckLoad.vehicle_id,
         truckLoad.vehicle_id ? null : truckLoad.license_plate,
+        truckLoad.license_plate_province_id,
         product.resend_date,
         truckLoadId,
       ],
@@ -661,15 +698,14 @@ export const loadTruckProduct = async (req, res) => {
           serial_id,
           serial_no,
           create_date,
-          is_receive,
-          manul_recive,
-          note,
-          cost
+          is_receive
         )
-        VALUES (?, ?, ?, NOW(), 'N', 'N', NULL, ?)
+        VALUES (?, ?, ?, NOW(), 'N')
       `,
-      [truckLoadId, product.serial_id, product.serial_no, product.cost ?? null],
+      [truckLoadId, product.serial_id, product.serial_no],
     );
+
+    await syncTruckBoxCount(connection, truckLoadId);
 
     await connection.commit();
     transactionStarted = false;
@@ -705,7 +741,17 @@ export const closeTruckLoad = async (req, res) => {
     transactionStarted = true;
 
     const [rows] = await connection.query(
-      `SELECT id, is_close FROM tm_trucks WHERE id = ? AND COALESCE(is_deleted, 'N') = 'N' LIMIT 1 FOR UPDATE`,
+      `
+        SELECT
+          truck.id,
+          truck.is_close,
+          (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS serial_count
+        FROM tm_trucks truck
+        WHERE truck.id = ?
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+        LIMIT 1
+        FOR UPDATE
+      `,
       [truckLoadId],
     );
 
@@ -719,6 +765,12 @@ export const closeTruckLoad = async (req, res) => {
       await connection.rollback();
       transactionStarted = false;
       return res.status(409).json({ success: false, message: "ใบนี้ปิดบรรทุกแล้ว" });
+    }
+
+    if (Number(rows[0].serial_count || 0) <= 0) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ใบปิดบรรทุกยังไม่มี Serial No" });
     }
 
     await connection.query(
@@ -845,6 +897,10 @@ export const getTruckLoadPrint = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบใบปิดบรรทุก" });
     }
 
+    if (truck.is_close !== "Y" || Number(truck.serial_count || 0) <= 0) {
+      return res.status(409).json({ success: false, message: "ต้องมี Serial No และปิดบรรทุกก่อนพิมพ์" });
+    }
+
     const [items] = await db.query(
       `
         SELECT
@@ -852,7 +908,7 @@ export const getTruckLoadPrint = async (req, res) => {
           detail.serial_id,
           detail.serial_no,
           detail.create_date,
-          detail.cost,
+          receive_data.cost,
           receive_data.receive_code,
           receive_data.customer_id,
           customer.name AS customer_name,
@@ -881,6 +937,7 @@ export const getTruckLoadPrint = async (req, res) => {
             MAX(district_name) AS district_name,
             MAX(province_name) AS province_name,
             MAX(zip_code) AS zip_code,
+            MAX(cost) AS cost,
             MAX(weight) AS weight,
             MAX(q) AS qty
           FROM tm_receive_serials
@@ -935,6 +992,8 @@ export const unloadTruckProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบรายการที่รอยิงกลับ" });
     }
 
+    await syncTruckBoxCount(connection, truckLoadId);
+
     await connection.commit();
     transactionStarted = false;
     return res.status(200).json({ success: true, message: `นำ SN ${serialNo} กลับรายการรอยิงแล้ว` });
@@ -956,6 +1015,7 @@ export const createTruckLoad = async (req, res) => {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const userTruckId = toNumberOrNull(req.body.user_truck_id);
     const vehicleId = toNumberOrNull(req.body.vehicle_id);
+    const licensePlateProvinceId = toNumberOrNull(req.body.license_plate_province_id);
     const toWarehouseId = toNumberOrNull(req.body.to_warehouse_id);
     const requestedDriverType = cleanCode(req.body.driver_type ?? req.body.truck_type)?.toUpperCase();
     const driverType = requestedDriverType === "EXTRA" || requestedDriverType === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE";
@@ -1014,12 +1074,19 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
+    if (driverType === "CONTRACTOR" && !licensePlateProvinceId) {
+      return res.status(400).json({
+        success: false,
+        message: "กรุณาเลือกจังหวัดทะเบียนรถ",
+      });
+    }
+
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
 
     const expectedDriverRole = driverType === "CONTRACTOR" ? 12 : 7;
-    const [[driverRows], [vehicleRows], [warehouseRows]] = await Promise.all([
+    const [[driverRows], [vehicleRows], [warehouseRows], [provinceRows]] = await Promise.all([
       connection.query(
         `
           SELECT id
@@ -1050,6 +1117,10 @@ export const createTruckLoad = async (req, res) => {
           LIMIT 1
         `,
         [toWarehouseId],
+      ),
+      connection.query(
+        `SELECT id FROM mm_province WHERE id = ? LIMIT 1`,
+        [licensePlateProvinceId],
       ),
     ]);
 
@@ -1083,6 +1154,12 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
+    if (driverType === "CONTRACTOR" && !provinceRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ success: false, message: "ไม่พบจังหวัดทะเบียนรถที่เลือก" });
+    }
+
     const truckCode = await createTruckCode(connection);
 
     const [result] = await connection.query(
@@ -1091,32 +1168,35 @@ export const createTruckLoad = async (req, res) => {
           truck_code,
           create_date,
           created_by,
-          customer_id,
           user_truck_id,
           driver_type,
           driver_name,
           vehicle_id,
           license_plate,
+          license_plate_province_id,
+          status,
           warehouse_id,
           to_warehouse_id,
           note
         )
-        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
       `,
       [
         truckCode,
         createdBy,
-        toNumberOrNull(req.body.customer_id),
         userTruckId,
         driverType,
         driverName,
         vehicleId,
         licensePlate,
+        driverType === "CONTRACTOR" ? licensePlateProvinceId : null,
         warehouseId,
         toWarehouseId,
         cleanDbText(req.body.note),
       ],
     );
+
+    await syncTruckBoxCount(connection, result.insertId);
 
     const createdRow = await getTruckLoadRow(connection, result.insertId);
 

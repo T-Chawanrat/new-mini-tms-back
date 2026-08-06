@@ -1,7 +1,6 @@
 import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
 
-
 // GET ROLES
 export const getRoles = async (req, res) => {
   try {
@@ -308,6 +307,26 @@ export const getReceiveDeliveryTypes = async (req, res) => {
     return res.json(rows);
   } catch (err) {
     console.error("GET RECEIVE DELIVERY TYPES ERROR:", err);
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+export const getProvinces = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `
+        SELECT
+          id,
+          province_name
+        FROM mm_province
+        WHERE 1 = 1
+        ORDER BY id ASC
+      `,
+    );
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("GET PROVINCES ERROR:", err);
     return res.status(500).json({ message: err.message });
   }
 };

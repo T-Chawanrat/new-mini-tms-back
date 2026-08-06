@@ -1039,6 +1039,31 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
     `,
     [cleanReceiveId],
   );
+
+  await conn.query(
+    `
+      INSERT INTO tm_product_customers (
+        serial_id,
+        serial_no,
+        customer_id,
+        shipper_id
+      )
+      SELECT
+        i.serial_id,
+        i.serial_no,
+        h.customer_id,
+        h.shipper_id
+      FROM tm_receive_import_head h
+      INNER JOIN tm_receive_import_details d
+        ON d.receive_id = h.receive_id
+      INNER JOIN tm_receive_import_detail_items i
+        ON i.receive_detail_id = d.receive_detail_id
+      WHERE h.receive_id = ?
+        AND i.serial_id IS NOT NULL
+        AND NULLIF(TRIM(i.serial_no), '') IS NOT NULL
+    `,
+    [cleanReceiveId],
+  );
 };
 
 export const insertImportProductTransactions = async ({

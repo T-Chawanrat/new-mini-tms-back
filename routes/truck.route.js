@@ -4,14 +4,14 @@ import express from "express";
 
 import {
   createTruckLoad,
-  closeTruckLoad,
+  closeAndGoTruckLoad,
+  deleteTruckLoad,
   getTruckLoadPrint,
   getTruckLoadById,
   getTruckLoadDrivers,
   getTruckLoadDummyUsers,
   getTruckLoadProducts,
   getTruckLoads,
-  goTruckLoad,
   loadTruckProduct,
   unloadTruckProduct,
 } from "../controllers/truck.controller.js";
@@ -27,8 +27,8 @@ router.get("/:truckLoadId/print", auth, getTruckLoadPrint);
 router.get("/:truckLoadId/products", auth, getTruckLoadProducts);
 router.post("/:truckLoadId/load-product", auth, loadTruckProduct);
 router.post("/:truckLoadId/unload-product", auth, unloadTruckProduct);
-router.patch("/:truckLoadId/close", auth, closeTruckLoad);
-router.post("/:truckLoadId/go", auth, goTruckLoad);
+router.patch("/:truckLoadId/close-and-go", auth, closeAndGoTruckLoad);
+router.patch("/:truckLoadId/delete", auth, deleteTruckLoad);
 router.post("/create-truck", auth, createTruckLoad);
 
 export default router;

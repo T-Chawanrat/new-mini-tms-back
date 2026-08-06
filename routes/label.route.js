@@ -1,5 +1,6 @@
 import express from "express";
 
+import { auth } from "../middlewares/auth.js";
 import {
   getLabelReceives,
   getLabelSerials,
@@ -12,7 +13,7 @@ const router = express.Router();
 router.get("/receives", getLabelReceives);
 router.get("/serials", getLabelSerials);
 
-router.post("/print", markLabelsPrinted);
+router.post("/print", auth, markLabelsPrinted);
 router.get("/:serialNo/history", getLabelPrintHistory);
 
 export default router;

@@ -1,10 +1,6 @@
 import db from "../config/db.js";
 
-import {
-  buildLike,
-  cleanDbText,
-  toNumberOrNull,
-} from "../utils/cleanText.js";
+import { buildLike, cleanDbText, toNumberOrNull } from "../utils/cleanText.js";
 
 const getPagination = (page, limit) => {
   const pageNum = Math.max(Number(page) || 1, 1);
@@ -104,13 +100,7 @@ const getFromWarehouseNameSelectSql = () => {
 };
 
 const buildReceiveWhere = (query) => {
-  const {
-    receive_date,
-    customer_id,
-    to_warehouse_id,
-    receive_code,
-    serial_no,
-  } = query;
+  const { receive_date, customer_id, to_warehouse_id, receive_code, serial_no } = query;
 
   const where = [];
   const params = [];
@@ -151,13 +141,7 @@ const buildReceiveWhere = (query) => {
 };
 
 const buildSerialWhere = (query) => {
-  const {
-    receive_code,
-    serial_no,
-    customer_id,
-    to_warehouse_id,
-    receive_date,
-  } = query;
+  const { receive_code, serial_no, customer_id, to_warehouse_id, receive_date } = query;
 
   const where = [];
   const params = [];
@@ -459,11 +443,7 @@ export const markLabelsPrinted = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
-    const {
-      items,
-      printed_by_user,
-      is_reprint,
-    } = req.body;
+    const { items, is_reprint } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -472,13 +452,16 @@ export const markLabelsPrinted = async (req, res) => {
       });
     }
 
-    const serialNos = [
-      ...new Set(
-        items
-          .map((item) => cleanDbText(item.serial_no))
-          .filter(Boolean),
-      ),
-    ];
+    const printedByUser = toNumberOrNull(req.user?.id);
+
+    if (printedByUser === null) {
+      return res.status(401).json({
+        success: false,
+        message: "ไม่พบข้อมูลผู้ใช้งานที่ปริ้น Label",
+      });
+    }
+
+    const serialNos = [...new Set(items.map((item) => cleanDbText(item.serial_no)).filter(Boolean))];
 
     if (serialNos.length === 0) {
       return res.status(400).json({
@@ -489,27 +472,22 @@ export const markLabelsPrinted = async (req, res) => {
 
     await connection.beginTransaction();
 
-    const placeholders = serialNos
-      .map(() => "?")
-      .join(",");
+    const placeholders = serialNos.map(() => "?").join(",");
 
     const [serialRows] = await connection.query(
       `
-      SELECT
-        receive_code,
-        serial_id,
-        serial_no,
-        customer_id,
-        to_warehouse_id,
-        recipient_code
-
-      FROM tm_receive_serials rs
-
-      WHERE
-        rs.serial_no IN (${placeholders})
-        AND rs.serial_no IS NOT NULL
-        AND rs.serial_no <> ''
-        AND ${activeSerialCondition}
+        SELECT
+          rs.receive_code,
+          rs.serial_id,
+          rs.serial_no,
+          rs.customer_id,
+          rs.to_warehouse_id,
+          rs.recipient_code
+        FROM tm_receive_serials rs
+        WHERE rs.serial_no IN (${placeholders})
+          AND rs.serial_no IS NOT NULL
+          AND rs.serial_no <> ''
+          AND ${activeSerialCondition}
       `,
       serialNos,
     );
@@ -523,21 +501,11 @@ export const markLabelsPrinted = async (req, res) => {
       });
     }
 
-    const foundSerialNoSet = new Set(
-      serialRows.map((row) => row.serial_no),
-    );
+    const foundSerialNoSet = new Set(serialRows.map((row) => row.serial_no));
 
-    const notFoundSerialNos = serialNos.filter(
-      (serialNo) => !foundSerialNoSet.has(serialNo),
-    );
+    const notFoundSerialNos = serialNos.filter((serialNo) => !foundSerialNoSet.has(serialNo));
 
-    const printType = is_reprint
-      ? "REPRINT"
-      : "PRINT";
-
-    const printedByUser = toNumberOrNull(
-      printed_by_user,
-    );
+    const printType = is_reprint ? "REPRINT" : "PRINT";
 
     const insertValues = serialRows.map((row) => [
       row.receive_code || null,
@@ -552,43 +520,38 @@ export const markLabelsPrinted = async (req, res) => {
 
     await connection.query(
       `
-      INSERT INTO logs_label_print (
-        receive_code,
-        serial_id,
-        serial_no,
-        customer_id,
-        to_warehouse_id,
-        recipient_code,
-        printed_by_user,
-        print_type
-      )
-      VALUES ?
+        INSERT INTO logs_label_print (
+          receive_code,
+          serial_id,
+          serial_no,
+          customer_id,
+          to_warehouse_id,
+          recipient_code,
+          printed_by_user,
+          print_type
+        )
+        VALUES ?
       `,
       [insertValues],
     );
 
     const [summaryRows] = await connection.query(
       `
-      SELECT
-        serial_no,
-        COUNT(*) AS print_count,
+        SELECT
+          serial_no,
+          COUNT(*) AS print_count,
 
-        SUM(
-          CASE
-            WHEN print_type = 'REPRINT' THEN 1
-            ELSE 0
-          END
-        ) AS reprint_count,
+          SUM(
+            CASE
+              WHEN print_type = 'REPRINT' THEN 1
+              ELSE 0
+            END
+          ) AS reprint_count,
 
-        MAX(created_at) AS last_printed_at
-
-      FROM logs_label_print
-
-      WHERE
-        serial_no IN (${placeholders})
-
-      GROUP BY
-        serial_no
+          MAX(created_at) AS last_printed_at
+        FROM logs_label_print
+        WHERE serial_no IN (${placeholders})
+        GROUP BY serial_no
       `,
       serialNos,
     );
@@ -598,17 +561,15 @@ export const markLabelsPrinted = async (req, res) => {
     return res.json({
       success: true,
 
-      message: is_reprint
-        ? "บันทึกการ re-print label สำเร็จ"
-        : "บันทึกการ print label สำเร็จ",
+      message: is_reprint ? "บันทึกการ re-print label สำเร็จ" : "บันทึกการ print label สำเร็จ",
+
+      printed_by_user: printedByUser,
 
       printed_count: serialRows.length,
 
-      not_found_count:
-        notFoundSerialNos.length,
+      not_found_count: notFoundSerialNos.length,
 
-      not_found_serial_nos:
-        notFoundSerialNos,
+      not_found_serial_nos: notFoundSerialNos,
 
       data: serialRows,
 
@@ -617,10 +578,7 @@ export const markLabelsPrinted = async (req, res) => {
   } catch (error) {
     await connection.rollback();
 
-    console.error(
-      "markLabelsPrinted error:",
-      error,
-    );
+    console.error("markLabelsPrinted error:", error);
 
     return res.status(500).json({
       success: false,
@@ -636,9 +594,7 @@ export const getLabelPrintHistory = async (req, res) => {
   try {
     const { serialNo } = req.params;
 
-    const normalizedSerialNo = cleanDbText(
-      serialNo,
-    );
+    const normalizedSerialNo = cleanDbText(serialNo);
 
     if (!normalizedSerialNo) {
       return res.status(400).json({
@@ -729,10 +685,7 @@ export const getLabelPrintHistory = async (req, res) => {
       data: rows,
     });
   } catch (error) {
-    console.error(
-      "getLabelPrintHistory error:",
-      error,
-    );
+    console.error("getLabelPrintHistory error:", error);
 
     return res.status(500).json({
       success: false,
@@ -741,4 +694,3 @@ export const getLabelPrintHistory = async (req, res) => {
     });
   }
 };
-

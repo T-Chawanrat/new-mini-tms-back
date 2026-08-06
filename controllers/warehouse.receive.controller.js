@@ -192,6 +192,33 @@ export const createWarehouseReceive = async (req, res) => {
       [values],
     );
 
+    await connection.query(
+      `
+        INSERT INTO logs_product_warehouses (
+          product_warehouse_id,
+          serial_id,
+          serial_no,
+          event_type,
+          now_warehouse_id,
+          to_warehouse_id,
+          created_by,
+          created_date
+        )
+        SELECT
+          pw.id,
+          pw.serial_id,
+          pw.serial_no,
+          'RECEIVE_IN',
+          pw.now_warehouse_id,
+          pw.to_warehouse_id,
+          ?,
+          NOW()
+        FROM tm_product_warehouses pw
+        WHERE pw.serial_no IN (${placeholders})
+      `,
+      [createdBy, ...serialNos],
+    );
+
     /*
      * บันทึกประวัติ Transaction
      * warehouse_id ตรงนี้ไม่ต้องเปลี่ยน เพราะเป็นคอลัมน์ของ

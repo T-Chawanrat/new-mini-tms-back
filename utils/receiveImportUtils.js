@@ -856,32 +856,6 @@ export const insertImportReceiveReference = async ({ conn, referenceNo, receiveI
   await conn.query(sql, values);
 };
 
-export const insertImportReceiveStatus = async ({ conn, receiveId, receiveCode }) => {
-  const cleanReceiveId = toNumberOrNull(receiveId);
-  const cleanReceiveCode = cleanCode(receiveCode);
-
-  if (!cleanReceiveId) {
-    throw createImportError("receive_id required for tm_receive_status");
-  }
-
-  if (!cleanReceiveCode) {
-    throw createImportError("receive_code required for tm_receive_status");
-  }
-
-  const data = {
-    receive_walkin_id: null,
-    receive_business_id: cleanReceiveId,
-    receive_code: cleanReceiveCode,
-    status_id: 1,
-    datetime: new Date(),
-    status: "รับเข้าระบบ",
-  };
-
-  const { sql, values } = buildInsertSql("tm_receive_status", data);
-
-  await conn.query(sql, values);
-};
-
 export const insertImportReceiveSerials = async (conn, receiveId) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
 
@@ -1046,21 +1020,20 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         serial_id,
         serial_no,
         customer_id,
-        shipper_id
+        shipper_id,
+        to_warehouse_id
       )
       SELECT
-        i.serial_id,
-        i.serial_no,
-        h.customer_id,
-        h.shipper_id
-      FROM tm_receive_import_head h
-      INNER JOIN tm_receive_import_details d
-        ON d.receive_id = h.receive_id
-      INNER JOIN tm_receive_import_detail_items i
-        ON i.receive_detail_id = d.receive_detail_id
-      WHERE h.receive_id = ?
-        AND i.serial_id IS NOT NULL
-        AND NULLIF(TRIM(i.serial_no), '') IS NOT NULL
+        receive_serial.serial_id,
+        receive_serial.serial_no,
+        receive_serial.customer_id,
+        receive_serial.shipper_id,
+        receive_serial.to_warehouse_id
+      FROM tm_receive_serials receive_serial
+      WHERE receive_serial.receive_business_id = ?
+        AND receive_serial.source_type = 'IMPORT'
+        AND receive_serial.serial_id IS NOT NULL
+        AND NULLIF(TRIM(receive_serial.serial_no), '') IS NOT NULL
     `,
     [cleanReceiveId],
   );

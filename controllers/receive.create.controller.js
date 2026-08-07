@@ -204,27 +204,6 @@ export const createReceive = async (req, res) => {
       await conn.query(insertReceiveReference.sql, insertReceiveReference.values);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 3. บันทึกสถานะเริ่มต้นของบิล
-    |--------------------------------------------------------------------------
-    | tm_receive_status.receive_business_id
-    | ใช้ค่าเดียวกับ tm_receives.receive_id
-    |--------------------------------------------------------------------------
-    */
-    const receiveStatusData = {
-      receive_walkin_id: null,
-      receive_business_id: receiveId,
-      receive_code: receiveCode,
-      status_id: 1,
-      datetime: new Date(),
-      status: "รับเข้าระบบ",
-    };
-
-    const insertReceiveStatus = buildInsertSql("tm_receive_status", receiveStatusData);
-
-    await conn.query(insertReceiveStatus.sql, insertReceiveStatus.values);
-
     let receiveDetailCount = 0;
     let receiveItemCount = 0;
     let autoSerialRunning = 1;

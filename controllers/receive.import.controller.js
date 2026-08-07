@@ -23,7 +23,6 @@ import {
   createActiveSerialOrThrow,
   getPackageByCode,
   insertImportReceiveReference,
-  insertImportReceiveStatus,
   insertImportReceiveSerials,
   insertImportProductTransactions,
 } from "../utils/receiveImportUtils.js";
@@ -154,12 +153,6 @@ export const importReceivesFromExcel = async (req, res) => {
         conn,
         referenceNo: firstRow.reference_no,
         receiveId,
-      });
-
-      await insertImportReceiveStatus({
-        conn,
-        receiveId,
-        receiveCode,
       });
 
       for (const row of billRows) {

@@ -490,23 +490,22 @@ export const insertCreateReceiveSerials = async (
         serial_id,
         serial_no,
         customer_id,
-        shipper_id
+        shipper_id,
+        to_warehouse_id
       )
       SELECT
-        i.serial_id,
-        i.serial_no,
-        r.customer_id,
-        r.shipper_id
-      FROM tm_receives r
-      INNER JOIN tm_receive_details d
-        ON d.receive_id = r.receive_id
-      INNER JOIN tm_receive_detail_items i
-        ON i.receive_detail_id = d.receive_detail_id
-      WHERE r.receive_id = ?
-        AND i.serial_id IS NOT NULL
-        AND NULLIF(TRIM(i.serial_no), '') IS NOT NULL
+        receive_serial.serial_id,
+        receive_serial.serial_no,
+        receive_serial.customer_id,
+        receive_serial.shipper_id,
+        receive_serial.to_warehouse_id
+      FROM tm_receive_serials receive_serial
+      WHERE receive_serial.receive_business_id = ?
+        AND receive_serial.source_type = ?
+        AND receive_serial.serial_id IS NOT NULL
+        AND NULLIF(TRIM(receive_serial.serial_no), '') IS NOT NULL
     `,
-    [cleanReceiveId],
+    [cleanReceiveId, sourceType],
   );
 };
 

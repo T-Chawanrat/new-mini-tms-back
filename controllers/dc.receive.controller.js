@@ -1,385 +1,225 @@
 import db from "../config/db.js";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
-import { formatDateOnly } from "../utils/formatDate.js";
 
-export const getWarehouseReceiveSerials = async (req, res) => {
+const cleanSerialNos = (value) =>
+  Array.isArray(value)
+    ? [...new Set(value.map((item) => cleanCode(item)).filter(Boolean))]
+    : [];
+
+export const getDcReceiveSerials = async (req, res) => {
   try {
-    const customerId = toNumberOrNull(req.query.customer_id);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
 
-    const where = [];
-    const params = [];
-
-    if (customerId !== null) {
-      where.push("product_customer.customer_id = ?");
-      params.push(customerId);
+    if (!warehouseId) {
+      return res.status(400).json({ success: false, message: "ผู้ใช้งานยังไม่ได้กำหนดคลัง DC" });
     }
 
-    const sql = `
-      SELECT
-        product_customer.serial_id,
-        product_customer.serial_no,
-        product_customer.customer_id,
-        c.name AS customer_name,
-        product_customer.to_warehouse_id,
-        wt.warehouse_name AS to_warehouse_name
-      FROM tm_product_customers product_customer
+    const [rows] = await db.query(
+      `
+        SELECT
+          product_truck.serial_id,
+          product_truck.serial_no,
+          truck.id AS truck_load_id,
+          truck.truck_code,
+          CASE
+            WHEN truck.driver_type = 'CONTRACTOR' THEN truck.driver_name
+            ELSE COALESCE(
+              NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''),
+              truck.driver_name
+            )
+          END AS driver_name,
+          CASE
+            WHEN truck.driver_type = 'CONTRACTOR' THEN truck.license_plate
+            ELSE COALESCE(vehicle.license_plate, truck.license_plate)
+          END AS license_plate,
+          truck.license_plate_province_id,
+          COALESCE(plate_province.province_name, vehicle.license_province) AS license_province
+        FROM tm_product_trucks product_truck
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
+        LEFT JOIN um_users driver
+          ON driver.id = truck.user_truck_id
+        LEFT JOIN mm_vehicles vehicle
+          ON vehicle.id = truck.vehicle_id
+        LEFT JOIN mm_province plate_province
+          ON plate_province.id = truck.license_plate_province_id
+        WHERE truck.to_warehouse_id = ?
+          AND truck.is_close = 'Y'
+          AND truck.is_go = 'Y'
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
+        ORDER BY truck.truck_code ASC, product_truck.id ASC
+      `,
+      [warehouseId],
+    );
 
-      LEFT JOIN mm_customers c
-        ON c.id = product_customer.customer_id
-
-      LEFT JOIN mm_warehouses_to wt
-        ON wt.warehouse_id = product_customer.to_warehouse_id
-
-      WHERE NULLIF(TRIM(product_customer.serial_no), '') IS NOT NULL
-
-        ${where.length ? `AND ${where.join("\n        AND ")}` : ""}
-
-      ORDER BY
-        c.name ASC,
-        wt.warehouse_name ASC,
-        product_customer.serial_no ASC
-    `;
-
-    const [rows] = await db.query(sql, params);
-
-    return res.status(200).json({
-      success: true,
-      total: rows.length,
-      data: rows,
-    });
+    return res.status(200).json({ success: true, total: rows.length, data: rows });
   } catch (error) {
-    console.error("getWarehouseReceiveSerials error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "ไม่สามารถโหลดข้อมูล Serial No ได้",
-      error: error.message,
-    });
+    console.error("getDcReceiveSerials error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการรอรับเข้า DC ได้" });
   }
 };
 
-export const createWarehouseReceive = async (req, res) => {
+export const createDcReceive = async (req, res) => {
   let connection;
+  let transactionStarted = false;
 
   try {
-    const serialNos = Array.isArray(req.body.serial_nos)
-      ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter((value) => value !== null))]
-      : [];
-
-    if (!serialNos.length) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณาระบุ Serial No ที่ต้องการรับเข้าคลัง",
-      });
-    }
-
-    const createdBy = toNumberOrNull(req.user?.id);
+    const serialNos = cleanSerialNos(req.body.serial_nos);
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
-    const resendDate = formatDateOnly(req.body.resend_date);
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
 
-    if (createdBy === null) {
-      return res.status(401).json({
-        success: false,
-        message: "ไม่พบข้อมูลผู้ใช้งาน",
-      });
-    }
-
-    if (warehouseId === null) {
-      return res.status(400).json({
-        success: false,
-        message: "ผู้ใช้งานยังไม่ได้กำหนดคลัง",
-      });
+    if (!serialNos.length || !warehouseId || !actorId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลรับสินค้าเข้า DC ไม่ถูกต้อง" });
     }
 
     connection = await db.getConnection();
     await connection.beginTransaction();
+    transactionStarted = true;
 
     const placeholders = serialNos.map(() => "?").join(", ");
-
-    /*
-     * tm_product_customers เป็นรายการรอรับและมีข้อมูลที่ต้องใช้สำหรับย้ายเข้าคลังครบแล้ว
-     */
-    const [serialRows] = await connection.query(
+    const [productRows] = await connection.query(
       `
-        SELECT DISTINCT
-          product_customer.serial_id,
-          product_customer.serial_no,
-          product_customer.to_warehouse_id
-        FROM tm_product_customers product_customer
-        WHERE product_customer.serial_no IN (${placeholders})
+        SELECT
+          product_truck.id AS product_truck_id,
+          product_truck.serial_id,
+          product_truck.serial_no,
+          product_warehouse.id AS product_warehouse_id
+        FROM tm_product_trucks product_truck
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
+        INNER JOIN tm_product_warehouses product_warehouse
+          ON product_warehouse.serial_id = product_truck.serial_id
+          AND product_warehouse.serial_no = product_truck.serial_no
+        WHERE product_truck.serial_no IN (${placeholders})
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND truck.to_warehouse_id = ?
+          AND truck.is_close = 'Y'
+          AND truck.is_go = 'Y'
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+        FOR UPDATE
       `,
-      serialNos,
+      [...serialNos, warehouseId],
     );
 
-    const foundSet = new Set(serialRows.map((row) => String(row.serial_no ?? "").trim()));
+    const foundSerials = new Set(productRows.map((row) => String(row.serial_no)));
+    const missingSerials = serialNos.filter((serialNo) => !foundSerials.has(serialNo));
 
-    const notFoundSerialNos = serialNos.filter((serialNo) => !foundSet.has(serialNo));
-
-    if (notFoundSerialNos.length > 0) {
+    if (missingSerials.length) {
       await connection.rollback();
-
+      transactionStarted = false;
       return res.status(400).json({
         success: false,
-        message: "พบ Serial No ที่ไม่มีอยู่ในระบบ",
-        not_found_serial_nos: notFoundSerialNos,
+        message: "พบ Serial No ที่ไม่ได้อยู่ในรถซึ่งมาถึง DC นี้",
+        not_found_serial_nos: missingSerials,
       });
     }
 
-    /*
-     * ตรวจสอบว่ารับเข้าคลังไปแล้วหรือยัง
-     */
-    const [existingRows] = await connection.query(
+    await connection.query(
       `
-        SELECT DISTINCT
-          pw.serial_no
-        FROM tm_product_warehouses pw
-        WHERE pw.serial_no IN (${placeholders})
+        UPDATE tm_product_warehouses product_warehouse
+        INNER JOIN tm_product_trucks product_truck
+          ON product_truck.serial_id = product_warehouse.serial_id
+          AND product_truck.serial_no = product_warehouse.serial_no
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
+        SET product_warehouse.now_warehouse_id = ?
+        WHERE product_truck.serial_no IN (${placeholders})
+          AND truck.to_warehouse_id = ?
       `,
-      serialNos,
-    );
-
-    if (existingRows.length > 0) {
-      const alreadyReceivedSerialNos = existingRows.map((row) => String(row.serial_no ?? "").trim());
-
-      await connection.rollback();
-
-      return res.status(409).json({
-        success: false,
-        message: "พบ Serial No ที่รับเข้าคลังไปแล้ว",
-        already_received_serial_nos: alreadyReceivedSerialNos,
-      });
-    }
-
-    /*
-     * now_warehouse_id = คลังปัจจุบันของผู้ใช้งาน
-     * to_warehouse_id  = คลังปลายทางจาก tm_product_customers
-     */
-    const values = serialRows.map((row) => [
-      row.serial_id,
-      row.serial_no,
-      warehouseId,
-      toNumberOrNull(row.to_warehouse_id),
-      null,
-      null,
-      resendDate,
-      createdBy,
-    ]);
-
-    const [result] = await connection.query(
-      `
-        INSERT INTO tm_product_warehouses (
-          serial_id,
-          serial_no,
-          now_warehouse_id,
-          to_warehouse_id,
-          palette_id,
-          route_id,
-          resend_date,
-          created_by
-        )
-        VALUES ?
-      `,
-      [values],
+      [warehouseId, ...serialNos, warehouseId],
     );
 
     await connection.query(
       `
         INSERT INTO logs_product_warehouses (
-          product_warehouse_id,
-          serial_id,
-          serial_no,
-          event_type,
-          now_warehouse_id,
-          to_warehouse_id,
-          created_by,
-          created_date
+          product_warehouse_id, serial_id, serial_no, event_type,
+          now_warehouse_id, to_warehouse_id, created_by, created_date
         )
         SELECT
-          pw.id,
-          pw.serial_id,
-          pw.serial_no,
-          'RECEIVE_IN',
-          pw.now_warehouse_id,
-          pw.to_warehouse_id,
+          product_warehouse.id,
+          product_warehouse.serial_id,
+          product_warehouse.serial_no,
+          'RECEIVE_DC',
+          product_warehouse.now_warehouse_id,
+          product_warehouse.to_warehouse_id,
           ?,
           NOW()
-        FROM tm_product_warehouses pw
-        WHERE pw.serial_no IN (${placeholders})
+        FROM tm_product_warehouses product_warehouse
+        WHERE product_warehouse.serial_no IN (${placeholders})
       `,
-      [createdBy, ...serialNos],
+      [actorId, ...serialNos],
     );
 
-    /*
-     * บันทึกประวัติ Transaction
-     * warehouse_id ตรงนี้ไม่ต้องเปลี่ยน เพราะเป็นคอลัมน์ของ
-     * tm_product_transactions ไม่ใช่ tm_product_warehouses
-     */
     await connection.query(
       `
-        INSERT INTO tm_product_transactions (
-          receive_business_id,
-          receive_walkin_id,
-          receive_code,
-          serial_id,
-          serial_no,
-          status_message,
-          status_id,
-          datetime,
-          update_date,
-          type,
-          warehouse_id,
-          created_by,
-          latitude,
-          longitude,
-          warehouse_name,
-          address,
-          province_name,
-          district_name,
-          subdistrict_name,
-          zip_code,
-          created_name,
-          username,
-          truck_license_plate,
-          user_id,
-          truck_name,
-          truck_id,
-          truck_province,
-          note,
-          data_year,
-          data_yearmonth
+        INSERT INTO logs_product_trucks (
+          product_truck_id, serial_id, serial_no, event_type, created_by,
+          user_truck_id, driver_name, truck_id, truck_license_plate,
+          license_plate_province_id, status, truck_load_id, is_dc_mismatch,
+          parcel_to_warehouse_id, truck_to_warehouse_id, created_date
         )
         SELECT
-          rs.receive_business_id,
-          rs.receive_walkin_id,
-          rs.receive_code,
-          rs.serial_id,
-          rs.serial_no,
-          'พัสดุถึงศูนย์',
-          4,
-          NOW(),
-          NULL,
-          'PUBLIC',
+          product_truck.id,
+          product_truck.serial_id,
+          product_truck.serial_no,
+          'UNLOAD',
           ?,
-          ?,
-          NULL,
-          NULL,
-          warehouse.warehouse_name,
-          rs.address,
-          rs.province_name,
-          rs.district_name,
-          rs.subdistrict_name,
-          rs.zip_code,
-          TRIM(
-            CONCAT_WS(
-              ' ',
-              NULLIF(actor.first_name, ''),
-              NULLIF(actor.last_name, '')
-            )
-          ),
-          actor.username,
-          NULL,
-          actor.id,
-          NULL,
-          NULL,
-          NULL,
-          NULL,
-          YEAR(NOW()),
-          CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
-        FROM tm_receive_serials rs
-
-        INNER JOIN um_users actor
-          ON actor.id = ?
-
-        LEFT JOIN mm_warehouses_to warehouse
-          ON warehouse.warehouse_id = ?
-
-        WHERE rs.serial_no IN (${placeholders})
-      `,
-      [warehouseId, createdBy, createdBy, warehouseId, ...serialNos],
-    );
-
-    /*
-     * อัปเดต Transaction ล่าสุด
-     * warehouse_id ตรงนี้ก็ยังเป็นของ tm_product_transactions_last
-     */
-    await connection.query(
-      `
-        UPDATE tm_product_transactions_last transaction_last
-
-        INNER JOIN tm_receive_serials rs
-          ON rs.serial_id = transaction_last.serial_id
-          AND rs.serial_no = transaction_last.serial_no
-
-        INNER JOIN um_users actor
-          ON actor.id = ?
-
-        LEFT JOIN mm_warehouses_to warehouse
-          ON warehouse.warehouse_id = ?
-
-        SET
-          transaction_last.status_message = 'พัสดุถึงศูนย์',
-          transaction_last.status_id = 4,
-          transaction_last.datetime = NOW(),
-          transaction_last.update_date = NOW(),
-          transaction_last.type = 'PUBLIC',
-          transaction_last.warehouse_id = ?,
-          transaction_last.created_by = ?,
-          transaction_last.warehouse_name = warehouse.warehouse_name,
-          transaction_last.address = rs.address,
-          transaction_last.province_name = rs.province_name,
-          transaction_last.district_name = rs.district_name,
-          transaction_last.subdistrict_name = rs.subdistrict_name,
-          transaction_last.zip_code = rs.zip_code,
-          transaction_last.created_name = TRIM(
-            CONCAT_WS(
-              ' ',
-              NULLIF(actor.first_name, ''),
-              NULLIF(actor.last_name, '')
-            )
-          ),
-          transaction_last.username = actor.username,
-          transaction_last.user_id = actor.id
-
-        WHERE rs.serial_no IN (${placeholders})
-      `,
-      [createdBy, warehouseId, warehouseId, createdBy, ...serialNos],
-    );
-
-    await connection.query(
-      `
-        DELETE product_customer
-        FROM tm_product_customers product_customer
+          product_truck.user_truck_id,
+          COALESCE(product_truck.driver_name, truck.driver_name),
+          product_truck.truck_id,
+          COALESCE(product_truck.truck_license_plate, truck.license_plate),
+          product_truck.license_plate_province_id,
+          product_truck.status,
+          product_truck.truck_load_id,
+          CASE WHEN product_warehouse.to_warehouse_id <> truck.to_warehouse_id THEN 'Y' ELSE 'N' END,
+          product_warehouse.to_warehouse_id,
+          truck.to_warehouse_id,
+          NOW()
+        FROM tm_product_trucks product_truck
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
         INNER JOIN tm_product_warehouses product_warehouse
-          ON product_warehouse.serial_id = product_customer.serial_id
-          AND product_warehouse.serial_no = product_customer.serial_no
-        WHERE product_customer.serial_no IN (${placeholders})
+          ON product_warehouse.serial_id = product_truck.serial_id
+          AND product_warehouse.serial_no = product_truck.serial_no
+        WHERE product_truck.serial_no IN (${placeholders})
+          AND truck.to_warehouse_id = ?
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
+      `,
+      [actorId, ...serialNos, warehouseId],
+    );
+
+    await connection.query(
+      `
+        UPDATE tm_truck_details detail
+        INNER JOIN tm_product_trucks product_truck
+          ON product_truck.truck_load_id = detail.truck_load_id
+          AND product_truck.serial_id = detail.serial_id
+          AND product_truck.serial_no = detail.serial_no
+        SET detail.is_receive = 'Y', detail.receive_by = ?, detail.receive_date = NOW()
+        WHERE product_truck.serial_no IN (${placeholders})
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
+      `,
+      [actorId, ...serialNos],
+    );
+
+    await connection.query(
+      `
+        UPDATE tm_product_trucks
+        SET status = 'DELIVERED'
+        WHERE serial_no IN (${placeholders})
+          AND status IN ('LOADED', 'DELIVERING')
       `,
       serialNos,
     );
 
     await connection.commit();
-
-    return res.status(201).json({
-      success: true,
-      message: "บันทึกรับสินค้าเข้าคลังสำเร็จ",
-      inserted: result.affectedRows,
-    });
+    transactionStarted = false;
+    return res.status(201).json({ success: true, message: "บันทึกรับสินค้าเข้า DC สำเร็จ", received: productRows.length });
   } catch (error) {
-    if (connection) {
-      try {
-        await connection.rollback();
-      } catch (rollbackError) {
-        console.error("createWarehouseReceive rollback error:", rollbackError);
-      }
-    }
-
-    console.error("createWarehouseReceive error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "ไม่สามารถบันทึกรับสินค้าเข้าคลังได้",
-      error: error.message,
-    });
+    if (connection && transactionStarted) await connection.rollback();
+    console.error("createDcReceive error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถบันทึกรับสินค้าเข้า DC ได้" });
   } finally {
     connection?.release();
   }

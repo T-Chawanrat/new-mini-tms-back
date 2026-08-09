@@ -15,7 +15,8 @@ export const getVehicles = async (req, res) => {
       SELECT
         v.id,
         v.license_plate,
-        v.license_province,
+        v.license_plate_province_id,
+        v.license_plate_province,
 
         v.brand_id,
         b.name AS brand_name,
@@ -45,13 +46,18 @@ export const getVehicles = async (req, res) => {
         v.is_deleted,
         v.created_at,
         v.updated_at
+
       FROM mm_vehicles v
+
       LEFT JOIN mm_vehicle_brands b
         ON b.id = v.brand_id
+
       LEFT JOIN mm_vehicle_types vt
         ON vt.id = v.vehicle_type_id
+
       LEFT JOIN mm_warehouses w
         ON w.id = v.warehouse_id
+
       WHERE v.is_deleted = 'N'
     `;
 
@@ -61,7 +67,7 @@ export const getVehicles = async (req, res) => {
       sql += `
         AND (
           ${buildLike("v.license_plate", search)}
-          OR ${buildLike("v.license_province", search)}
+          OR ${buildLike("v.license_plate_province", search)}
           OR ${buildLike("b.name", search)}
           OR ${buildLike("v.model", search)}
           OR ${buildLike("v.color", search)}
@@ -113,7 +119,7 @@ export const createVehicle = async (req, res) => {
 
     const {
       license_plate,
-      license_province,
+      license_plate_province_id,
       brand_id,
       model,
       color,
@@ -141,8 +147,10 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "ทะเบียนไม่ถูกต้อง" });
     }
 
-    if (!license_province) {
-      return res.status(400).json({ message: "license_province required" });
+    if (!license_plate_province_id) {
+      return res
+        .status(400)
+        .json({ message: "license_plate_province_id required" });
     }
 
     if (!brand_id) {
@@ -171,11 +179,30 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "invalid owner_type" });
     }
 
+    const [provinceRows] = await db.query(
+      `
+      SELECT province_name
+      FROM mm_province
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [license_plate_province_id],
+    );
+
+    if (!provinceRows.length) {
+      return res.status(400).json({
+        message: "license_plate_province_id ไม่ถูกต้อง",
+      });
+    }
+
+    const licensePlateProvince = provinceRows[0].province_name;
+
     const [result] = await db.query(
       `
       INSERT INTO mm_vehicles (
         license_plate,
-        license_province,
+        license_plate_province_id,
+        license_plate_province,
         brand_id,
         model,
         color,
@@ -192,11 +219,12 @@ export const createVehicle = async (req, res) => {
         chassis_no,
         engine_no
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         plate,
-        license_province || null,
+        license_plate_province_id,
+        licensePlateProvince,
         brand_id,
         model || null,
         color || null,
@@ -215,7 +243,10 @@ export const createVehicle = async (req, res) => {
       ],
     );
 
-    res.json({ message: "create success", id: result.insertId });
+    res.json({
+      message: "create success",
+      id: result.insertId,
+    });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res.status(400).json({
@@ -225,7 +256,8 @@ export const createVehicle = async (req, res) => {
 
     if (err.code === "ER_NO_REFERENCED_ROW_2") {
       return res.status(400).json({
-        message: "brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
+        message:
+          "license_plate_province_id, brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
       });
     }
 
@@ -243,7 +275,7 @@ export const updateVehicle = async (req, res) => {
 
     const {
       license_plate,
-      license_province,
+      license_plate_province_id,
       brand_id,
       model,
       color,
@@ -271,8 +303,10 @@ export const updateVehicle = async (req, res) => {
       return res.status(400).json({ message: "ทะเบียนไม่ถูกต้อง" });
     }
 
-    if (!license_province) {
-      return res.status(400).json({ message: "license_province required" });
+    if (!license_plate_province_id) {
+      return res.status(400).json({
+        message: "license_plate_province_id required",
+      });
     }
 
     if (!brand_id) {
@@ -301,12 +335,31 @@ export const updateVehicle = async (req, res) => {
       return res.status(400).json({ message: "invalid owner_type" });
     }
 
+    const [provinceRows] = await db.query(
+      `
+      SELECT province_name
+      FROM mm_province
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [license_plate_province_id],
+    );
+
+    if (!provinceRows.length) {
+      return res.status(400).json({
+        message: "license_plate_province_id ไม่ถูกต้อง",
+      });
+    }
+
+    const licensePlateProvince = provinceRows[0].province_name;
+
     const [result] = await db.query(
       `
       UPDATE mm_vehicles
       SET
         license_plate = ?,
-        license_province = ?,
+        license_plate_province_id = ?,
+        license_plate_province = ?,
         brand_id = ?,
         model = ?,
         color = ?,
@@ -327,7 +380,8 @@ export const updateVehicle = async (req, res) => {
       `,
       [
         plate,
-        license_province || null,
+        license_plate_province_id,
+        licensePlateProvince,
         brand_id,
         model || null,
         color || null,
@@ -361,7 +415,8 @@ export const updateVehicle = async (req, res) => {
 
     if (err.code === "ER_NO_REFERENCED_ROW_2") {
       return res.status(400).json({
-        message: "brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
+        message:
+          "license_plate_province_id, brand_id, vehicle_type_id หรือ warehouse_id ไม่ถูกต้อง",
       });
     }
 

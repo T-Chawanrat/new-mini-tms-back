@@ -23,8 +23,16 @@ export const getDriverUsers = async (req, res) => {
       SELECT
         id,
         employee_code,
+        title_name,
         first_name,
-        last_name
+        last_name,
+        gender,
+        citizen_id,
+        tel,
+        role_id,
+        warehouse_id,
+        license_no,
+        license_expire
       FROM um_users
       WHERE role_id = 7
       ORDER BY first_name ASC, last_name ASC
@@ -51,13 +59,42 @@ export const getActiveVehicles = async (req, res) => {
   try {
     const sql = `
       SELECT
-        id,
-        license_plate,
-        license_province,
-        model
-      FROM mm_vehicles
-      WHERE status = 'ACTIVE'
-      ORDER BY license_plate ASC
+        v.id,
+        v.license_plate,
+        v.license_plate_province_id,
+        v.license_plate_province,
+
+        v.model,
+        v.color,
+        v.vehicle_year,
+
+        v.vehicle_type_id,
+        vt.name AS vehicle_type_name,
+
+        v.fuel_type,
+        v.capacity_kg,
+        v.max_load_kg,
+
+        v.warehouse_id,
+        w.warehouse_name,
+
+        v.owner_type,
+        v.owner_name,
+        v.purchase_date,
+        v.fleet_card_no,
+        v.chassis_no,
+        v.engine_no
+
+      FROM mm_vehicles v
+
+      LEFT JOIN mm_vehicle_types vt
+        ON vt.id = v.vehicle_type_id
+
+      LEFT JOIN mm_warehouses_to w
+        ON w.warehouse_id = v.warehouse_id
+
+      WHERE v.status = 'ACTIVE'
+      ORDER BY v.license_plate ASC
     `;
 
     const [rows] = await db.query(sql);

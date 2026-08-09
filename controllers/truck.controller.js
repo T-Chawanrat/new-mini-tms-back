@@ -46,7 +46,7 @@ const TRUCK_SELECT_FIELDS = `
   t.user_truck_id,
   t.driver_type,
   t.vehicle_id,
-  t.license_plate_province_id,
+  vehicle.license_plate_province_id,
   t.status,
   t.warehouse_id,
   t.to_warehouse_id,
@@ -91,11 +91,8 @@ const TRUCK_SELECT_FIELDS = `
     )
   END AS driver_name,
 
-  CASE
-    WHEN t.driver_type = 'CONTRACTOR' THEN t.license_plate
-    ELSE COALESCE(vehicle.license_plate, t.license_plate)
-  END AS license_plate,
-  COALESCE(plate_province.province_name, vehicle.license_province) AS license_province,
+  vehicle.license_plate AS license_plate,
+  vehicle.license_plate_province AS license_province,
   vehicle.model,
   COALESCE(
     truck_count.count_box,
@@ -115,7 +112,7 @@ const TRUCK_FROM_JOINS = `
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = t.vehicle_id
   LEFT JOIN mm_province plate_province
-    ON plate_province.id = t.license_plate_province_id
+    ON plate_province.id = vehicle.license_plate_province_id
   LEFT JOIN tm_truck_count truck_count
     ON truck_count.truck_load_id = t.id
 `;
@@ -221,7 +218,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         rs.zip_code,
         TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         actor.username,
-        COALESCE(product_truck.truck_license_plate, truck.license_plate),
+        vehicle.license_plate,
         truck.user_truck_id,
         truck.truck_code,
         truck.vehicle_id,
@@ -236,8 +233,10 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON actor.id = ?
       LEFT JOIN mm_warehouses_to warehouse
         ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_vehicles vehicle
+        ON vehicle.id = product_truck.truck_id
       LEFT JOIN mm_province plate_province
-        ON plate_province.id = truck.license_plate_province_id
+        ON plate_province.id = vehicle.license_plate_province_id
       LEFT JOIN tm_receive_serials rs
         ON rs.serial_id = product_truck.serial_id
         AND rs.serial_no = product_truck.serial_no
@@ -258,8 +257,10 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON actor.id = ?
       LEFT JOIN mm_warehouses_to warehouse
         ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_vehicles vehicle
+        ON vehicle.id = product_truck.truck_id
       LEFT JOIN mm_province plate_province
-        ON plate_province.id = truck.license_plate_province_id
+        ON plate_province.id = vehicle.license_plate_province_id
       SET
         transaction_last.status_message = ?,
         transaction_last.status_id = ?,
@@ -271,7 +272,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.warehouse_name = warehouse.warehouse_name,
         transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         transaction_last.username = actor.username,
-        transaction_last.truck_license_plate = COALESCE(product_truck.truck_license_plate, truck.license_plate),
+        transaction_last.truck_license_plate = vehicle.license_plate,
         transaction_last.user_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
         transaction_last.truck_id = truck.vehicle_id,
@@ -697,14 +698,12 @@ export const loadTruckProduct = async (req, res) => {
           user_truck_id,
           driver_name,
           truck_id,
-          truck_license_plate,
-          license_plate_province_id,
           resend_date,
           truck_load_id,
           created_by,
           created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         product.serial_id,
@@ -712,8 +711,6 @@ export const loadTruckProduct = async (req, res) => {
         truckLoad.user_truck_id,
         truckLoad.driver_name,
         truckLoad.vehicle_id,
-        truckLoad.vehicle_id ? null : truckLoad.license_plate,
-        truckLoad.license_plate_province_id,
         product.resend_date,
         truckLoadId,
         actorId,
@@ -1001,8 +998,8 @@ export const unloadTruckProduct = async (req, res) => {
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name) AS driver_name,
           product_truck.truck_id,
-          COALESCE(product_truck.truck_license_plate, truck.license_plate) AS truck_license_plate,
-          product_truck.license_plate_province_id,
+          vehicle.license_plate AS truck_license_plate,
+          vehicle.license_plate_province_id AS license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           product_warehouse.to_warehouse_id AS parcel_to_warehouse_id,
@@ -1010,6 +1007,8 @@ export const unloadTruckProduct = async (req, res) => {
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
+        LEFT JOIN mm_vehicles vehicle
+          ON vehicle.id = product_truck.truck_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = product_truck.serial_id
           AND product_warehouse.serial_no = product_truck.serial_no
@@ -1163,8 +1162,8 @@ export const deleteTruckLoad = async (req, res) => {
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
           product_truck.truck_id,
-          COALESCE(product_truck.truck_license_plate, truck.license_plate),
-          product_truck.license_plate_province_id,
+          vehicle.license_plate,
+          vehicle.license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           CASE
@@ -1180,6 +1179,8 @@ export const deleteTruckLoad = async (req, res) => {
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
+        LEFT JOIN mm_vehicles vehicle
+          ON vehicle.id = product_truck.truck_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.id = (
             SELECT MAX(product_warehouse_latest.id)
@@ -1236,7 +1237,6 @@ export const createTruckLoad = async (req, res) => {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const userTruckId = toNumberOrNull(req.body.user_truck_id);
     const vehicleId = toNumberOrNull(req.body.vehicle_id);
-    const licensePlateProvinceId = toNumberOrNull(req.body.license_plate_province_id);
     const toWarehouseId = toNumberOrNull(req.body.to_warehouse_id);
     const requestedDriverType = cleanCode(req.body.driver_type ?? req.body.truck_type)?.toUpperCase();
     const driverType = requestedDriverType === "EXTRA" || requestedDriverType === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE";
@@ -1244,7 +1244,6 @@ export const createTruckLoad = async (req, res) => {
       cleanDbText(req.body.driver_name) ||
       [cleanDbText(req.body.driver_first_name), cleanDbText(req.body.driver_last_name)].filter(Boolean).join(" ") ||
       null;
-    const licensePlate = cleanCode(req.body.license_plate);
 
     if (!createdBy) {
       return res.status(401).json({
@@ -1267,7 +1266,7 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    if (driverType === "EMPLOYEE" && !vehicleId) {
+    if (!vehicleId) {
       return res.status(400).json({
         success: false,
         message: "กรุณาเลือกรถ",
@@ -1288,26 +1287,12 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    if (!licensePlate) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณาระบุทะเบียนรถ",
-      });
-    }
-
-    if (driverType === "CONTRACTOR" && !licensePlateProvinceId) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณาเลือกจังหวัดทะเบียนรถ",
-      });
-    }
-
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
 
     const expectedDriverRole = driverType === "CONTRACTOR" ? 12 : 7;
-    const [[driverRows], [vehicleRows], [warehouseRows], [provinceRows]] = await Promise.all([
+    const [[driverRows], [vehicleRows], [warehouseRows]] = await Promise.all([
       connection.query(
         `
           SELECT id
@@ -1339,10 +1324,6 @@ export const createTruckLoad = async (req, res) => {
         `,
         [toWarehouseId],
       ),
-      connection.query(
-        `SELECT id FROM mm_province WHERE id = ? LIMIT 1`,
-        [licensePlateProvinceId],
-      ),
     ]);
 
     if (!driverRows.length) {
@@ -1355,7 +1336,7 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    if (driverType === "EMPLOYEE" && !vehicleRows.length) {
+    if (!vehicleRows.length) {
       await connection.rollback();
       transactionStarted = false;
 
@@ -1375,12 +1356,6 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    if (driverType === "CONTRACTOR" && !provinceRows.length) {
-      await connection.rollback();
-      transactionStarted = false;
-      return res.status(400).json({ success: false, message: "ไม่พบจังหวัดทะเบียนรถที่เลือก" });
-    }
-
     const truckCode = await createTruckCode(connection);
 
     const [result] = await connection.query(
@@ -1393,14 +1368,12 @@ export const createTruckLoad = async (req, res) => {
           driver_type,
           driver_name,
           vehicle_id,
-          license_plate,
-          license_plate_province_id,
           status,
           warehouse_id,
           to_warehouse_id,
           note
         )
-        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
+        VALUES (?, NOW(), ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
       `,
       [
         truckCode,
@@ -1409,8 +1382,6 @@ export const createTruckLoad = async (req, res) => {
         driverType,
         driverName,
         vehicleId,
-        licensePlate,
-        driverType === "CONTRACTOR" ? licensePlateProvinceId : null,
         warehouseId,
         toWarehouseId,
         cleanDbText(req.body.note),

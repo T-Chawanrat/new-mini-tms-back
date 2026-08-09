@@ -15,12 +15,9 @@ const TRUCK_LIST_SELECT = `
       truck.driver_name
     )
   END AS driver_name,
-  CASE
-    WHEN truck.driver_type = 'CONTRACTOR' THEN truck.license_plate
-    ELSE COALESCE(vehicle.license_plate, truck.license_plate)
-  END AS license_plate,
-  truck.license_plate_province_id,
-  COALESCE(plate_province.province_name, vehicle.license_province) AS license_province,
+  vehicle.license_plate,
+  vehicle.license_plate_province_id,
+  vehicle.license_plate_province AS license_province,
   (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS count_box,
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name
@@ -36,8 +33,6 @@ const TRUCK_LIST_JOINS = `
     ON driver.id = truck.user_truck_id
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = truck.vehicle_id
-  LEFT JOIN mm_province plate_province
-    ON plate_province.id = truck.license_plate_province_id
 `;
 
 const syncTruckCount = async (connection, truckLoadId) => {
@@ -126,18 +121,18 @@ export const getMoveTkProducts = async (req, res) => {
           product_truck.serial_id,
           product_truck.serial_no,
           truck.driver_type,
-          CASE
-            WHEN truck.driver_type = 'CONTRACTOR' THEN truck.license_plate
-            ELSE COALESCE(vehicle.license_plate, truck.license_plate)
-          END AS license_plate,
-          truck.license_plate_province_id,
+          vehicle.license_plate,
+          vehicle.license_plate_province_id,
+          vehicle.license_plate_province AS license_province,
           product_warehouse.to_warehouse_id,
           destination.warehouse_name AS to_warehouse_name
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
-          ON vehicle.id = truck.vehicle_id
+          ON vehicle.id = product_truck.truck_id
+        LEFT JOIN mm_province plate_province
+          ON plate_province.id = vehicle.license_plate_province_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.id = (
             SELECT MAX(latest_warehouse.id)
@@ -231,11 +226,17 @@ export const moveTkProducts = async (req, res) => {
 
     const [result] = await connection.query(
       `
-        UPDATE tm_product_trucks
-        SET truck_load_id = ?
-        WHERE truck_load_id = ?
-          AND serial_no IN (${placeholders})
-          AND status IN ('PENDING', 'LOADED', 'DELIVERING')
+        UPDATE tm_product_trucks product_truck
+        INNER JOIN tm_trucks target_truck
+          ON target_truck.id = ?
+        SET
+          product_truck.truck_load_id = target_truck.id,
+          product_truck.user_truck_id = target_truck.user_truck_id,
+          product_truck.driver_name = target_truck.driver_name,
+          product_truck.truck_id = target_truck.vehicle_id
+        WHERE product_truck.truck_load_id = ?
+          AND product_truck.serial_no IN (${placeholders})
+          AND product_truck.status IN ('PENDING', 'LOADED', 'DELIVERING')
       `,
       [targetTruckLoadId, sourceTruckLoadId, ...serialNos],
     );
@@ -285,11 +286,8 @@ export const moveTkProducts = async (req, res) => {
             )
           END,
           target_truck.vehicle_id,
-          CASE
-            WHEN target_truck.driver_type = 'CONTRACTOR' THEN target_truck.license_plate
-            ELSE COALESCE(vehicle.license_plate, target_truck.license_plate)
-          END,
-          target_truck.license_plate_province_id,
+          vehicle.license_plate,
+          vehicle.license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           CASE

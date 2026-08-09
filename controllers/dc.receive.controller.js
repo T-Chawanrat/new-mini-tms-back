@@ -28,21 +28,18 @@ export const getDcReceiveSerials = async (req, res) => {
               truck.driver_name
             )
           END AS driver_name,
-          CASE
-            WHEN truck.driver_type = 'CONTRACTOR' THEN truck.license_plate
-            ELSE COALESCE(vehicle.license_plate, truck.license_plate)
-          END AS license_plate,
-          truck.license_plate_province_id,
-          COALESCE(plate_province.province_name, vehicle.license_province) AS license_province
+          vehicle.license_plate,
+          vehicle.license_plate_province_id,
+          vehicle.license_plate_province AS license_province
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN um_users driver
           ON driver.id = truck.user_truck_id
         LEFT JOIN mm_vehicles vehicle
-          ON vehicle.id = truck.vehicle_id
+          ON vehicle.id = product_truck.truck_id
         LEFT JOIN mm_province plate_province
-          ON plate_province.id = truck.license_plate_province_id
+          ON plate_province.id = vehicle.license_plate_province_id
         WHERE truck.to_warehouse_id = ?
           AND truck.is_close = 'Y'
           AND truck.is_go = 'Y'
@@ -168,8 +165,8 @@ export const createDcReceive = async (req, res) => {
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
           product_truck.truck_id,
-          COALESCE(product_truck.truck_license_plate, truck.license_plate),
-          product_truck.license_plate_province_id,
+          vehicle.license_plate,
+          vehicle.license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           CASE WHEN product_warehouse.to_warehouse_id <> truck.to_warehouse_id THEN 'Y' ELSE 'N' END,

@@ -522,7 +522,7 @@ export const getTruckLoadProducts = async (req, res) => {
         ON warehouse_to.warehouse_id = pw.to_warehouse_id
       LEFT JOIN tm_product_trucks active_truck
         ON active_truck.serial_id = pw.serial_id
-        AND active_truck.status IN ('PENDING', 'LOADED', 'DELIVERING')
+        AND active_truck.status IN ('LOADED', 'DELIVERING')
       WHERE NULLIF(TRIM(pw.serial_no), '') IS NOT NULL
         AND pw.now_warehouse_id = ?
         AND pw.to_warehouse_id = ?
@@ -556,7 +556,7 @@ export const getTruckLoadProducts = async (req, res) => {
         LEFT JOIN mm_warehouses_to warehouse_to
           ON warehouse_to.warehouse_id = rs.to_warehouse_id
         WHERE pt.truck_load_id = ?
-          AND pt.status IN ('PENDING', 'LOADED', 'DELIVERING')
+          AND pt.status IN ('LOADED', 'DELIVERING')
         ORDER BY pt.id DESC
       `,
       [truckLoadId],
@@ -678,7 +678,7 @@ export const loadTruckProduct = async (req, res) => {
         SELECT id
         FROM tm_product_trucks
         WHERE serial_id = ?
-          AND status IN ('PENDING', 'LOADED', 'DELIVERING')
+          AND status IN ('LOADED', 'DELIVERING')
         LIMIT 1
       `,
       [product.serial_id],
@@ -698,12 +698,13 @@ export const loadTruckProduct = async (req, res) => {
           user_truck_id,
           driver_name,
           truck_id,
+          status,
           resend_date,
           truck_load_id,
           created_by,
           created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, NOW())
       `,
       [
         product.serial_id,
@@ -737,7 +738,7 @@ export const loadTruckProduct = async (req, res) => {
           truck_to_warehouse_id,
           created_date
         )
-        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?, NOW())
       `,
       [
         productTruckResult.insertId,
@@ -858,7 +859,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
       [actorId, actorId, truckLoadId],
     );
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status IN ('PENDING', 'LOADED')`,
+      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
       [truckLoadId],
     );
     if (rows[0].is_close !== "Y") {
@@ -1014,7 +1015,7 @@ export const unloadTruckProduct = async (req, res) => {
           AND product_warehouse.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no = ?
-          AND product_truck.status = 'PENDING'
+          AND product_truck.status = 'LOADED'
         ORDER BY product_warehouse.id DESC
         LIMIT 1
         FOR UPDATE

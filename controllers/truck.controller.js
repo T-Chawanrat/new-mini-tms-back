@@ -46,7 +46,8 @@ const TRUCK_SELECT_FIELDS = `
   t.user_truck_id,
   t.driver_type,
   t.vehicle_id,
-  vehicle.license_plate_province_id,
+  t.vehicle_contractor_id,
+  COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
   t.status,
   t.warehouse_id,
   t.to_warehouse_id,
@@ -72,28 +73,15 @@ const TRUCK_SELECT_FIELDS = `
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name,
 
-  CASE
-    WHEN t.driver_type = 'CONTRACTOR' THEN NULL
-    ELSE driver.employee_code
-  END AS employee_code,
-  CASE
-    WHEN t.driver_type = 'CONTRACTOR' THEN t.driver_name
-    ELSE COALESCE(
-      NULLIF(
-        CONCAT_WS(
-          ' ',
-          NULLIF(driver.first_name, ''),
-          NULLIF(driver.last_name, '')
-        ),
-        ''
-      ),
-      t.driver_name
-    )
-  END AS driver_name,
+  driver.employee_code,
+  COALESCE(
+    NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''),
+    t.driver_name
+  ) AS driver_name,
 
-  vehicle.license_plate AS license_plate,
-  vehicle.license_plate_province AS license_province,
-  vehicle.model,
+  COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
+  COALESCE(vehicle.license_plate_province, contractor_plate_province.province_name) AS license_province,
+  COALESCE(vehicle.model, contractor_vehicle.model) AS model,
   COALESCE(
     truck_count.count_box,
     (SELECT COUNT(*) FROM tm_truck_details detail_count WHERE detail_count.truck_load_id = t.id),
@@ -111,8 +99,12 @@ const TRUCK_FROM_JOINS = `
     ON driver.id = t.user_truck_id
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = t.vehicle_id
+  LEFT JOIN mm_vehicles_contractor contractor_vehicle
+    ON contractor_vehicle.id = t.vehicle_contractor_id
   LEFT JOIN mm_province plate_province
     ON plate_province.id = vehicle.license_plate_province_id
+  LEFT JOIN mm_province contractor_plate_province
+    ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
   LEFT JOIN tm_truck_count truck_count
     ON truck_count.truck_load_id = t.id
 `;
@@ -218,11 +210,11 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         rs.zip_code,
         TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         actor.username,
-        vehicle.license_plate,
+        COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
         truck.user_truck_id,
         truck.truck_code,
-        truck.vehicle_id,
-        plate_province.province_name,
+        COALESCE(truck.vehicle_id, truck.vehicle_contractor_id),
+        COALESCE(plate_province.province_name, contractor_plate_province.province_name),
         NULL,
         YEAR(NOW()),
         CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
@@ -235,8 +227,12 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON warehouse.warehouse_id = truck.warehouse_id
       LEFT JOIN mm_vehicles vehicle
         ON vehicle.id = product_truck.truck_id
+      LEFT JOIN mm_vehicles_contractor contractor_vehicle
+        ON contractor_vehicle.id = truck.vehicle_contractor_id
       LEFT JOIN mm_province plate_province
         ON plate_province.id = vehicle.license_plate_province_id
+      LEFT JOIN mm_province contractor_plate_province
+        ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
       LEFT JOIN tm_receive_serials rs
         ON rs.serial_id = product_truck.serial_id
         AND rs.serial_no = product_truck.serial_no
@@ -259,8 +255,12 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON warehouse.warehouse_id = truck.warehouse_id
       LEFT JOIN mm_vehicles vehicle
         ON vehicle.id = product_truck.truck_id
+      LEFT JOIN mm_vehicles_contractor contractor_vehicle
+        ON contractor_vehicle.id = truck.vehicle_contractor_id
       LEFT JOIN mm_province plate_province
         ON plate_province.id = vehicle.license_plate_province_id
+      LEFT JOIN mm_province contractor_plate_province
+        ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
       SET
         transaction_last.status_message = ?,
         transaction_last.status_id = ?,
@@ -272,11 +272,11 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.warehouse_name = warehouse.warehouse_name,
         transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         transaction_last.username = actor.username,
-        transaction_last.truck_license_plate = vehicle.license_plate,
+        transaction_last.truck_license_plate = COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
         transaction_last.user_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
-        transaction_last.truck_id = truck.vehicle_id,
-        transaction_last.truck_province = plate_province.province_name
+        transaction_last.truck_id = COALESCE(truck.vehicle_id, truck.vehicle_contractor_id),
+        transaction_last.truck_province = COALESCE(plate_province.province_name, contractor_plate_province.province_name)
       WHERE product_truck.truck_load_id = ?
     `,
     [actorId, statusMessage, statusId, truckLoadId],
@@ -386,6 +386,7 @@ export const getTruckLoadDrivers = async (req, res) => {
         last_name
       FROM um_users
       WHERE role_id = 7
+        AND COALESCE(employment_type, 'EMPLOYEE') = 'EMPLOYEE'
         AND COALESCE(is_active, 1) = 1
       ORDER BY first_name ASC, last_name ASC, employee_code ASC
     `);
@@ -400,35 +401,6 @@ export const getTruckLoadDrivers = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "ไม่สามารถโหลดข้อมูลพนักงานขับรถได้",
-    });
-  }
-};
-
-export const getTruckLoadDummyUsers = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT
-        id,
-        id AS user_id,
-        employee_code,
-        first_name,
-        last_name
-      FROM um_users
-      WHERE role_id = 12
-        AND COALESCE(is_active, 1) = 1
-      ORDER BY first_name ASC, last_name ASC, employee_code ASC
-    `);
-
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    console.error("getTruckLoadDummyUsers error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "ไม่สามารถโหลดข้อมูล User Dummy ได้",
     });
   }
 };
@@ -747,7 +719,7 @@ export const loadTruckProduct = async (req, res) => {
         actorId,
         truckLoad.user_truck_id,
         truckLoad.driver_name,
-        truckLoad.vehicle_id,
+        truckLoad.vehicle_id ?? truckLoad.vehicle_contractor_id,
         truckLoad.license_plate,
         truckLoad.license_plate_province_id,
         truckLoadId,
@@ -998,9 +970,9 @@ export const unloadTruckProduct = async (req, res) => {
           product_truck.serial_no,
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name) AS driver_name,
-          product_truck.truck_id,
-          vehicle.license_plate AS truck_license_plate,
-          vehicle.license_plate_province_id AS license_plate_province_id,
+          COALESCE(product_truck.truck_id, truck.vehicle_contractor_id) AS truck_id,
+          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS truck_license_plate,
+          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           product_warehouse.to_warehouse_id AS parcel_to_warehouse_id,
@@ -1010,6 +982,8 @@ export const unloadTruckProduct = async (req, res) => {
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
           ON vehicle.id = product_truck.truck_id
+        LEFT JOIN mm_vehicles_contractor contractor_vehicle
+          ON contractor_vehicle.id = truck.vehicle_contractor_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = product_truck.serial_id
           AND product_warehouse.serial_no = product_truck.serial_no
@@ -1162,9 +1136,9 @@ export const deleteTruckLoad = async (req, res) => {
           ?,
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
-          product_truck.truck_id,
-          vehicle.license_plate,
-          vehicle.license_plate_province_id,
+          COALESCE(product_truck.truck_id, truck.vehicle_contractor_id),
+          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
           product_truck.status,
           product_truck.truck_load_id,
           CASE
@@ -1182,6 +1156,8 @@ export const deleteTruckLoad = async (req, res) => {
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
           ON vehicle.id = product_truck.truck_id
+        LEFT JOIN mm_vehicles_contractor contractor_vehicle
+          ON contractor_vehicle.id = truck.vehicle_contractor_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.id = (
             SELECT MAX(product_warehouse_latest.id)
@@ -1238,13 +1214,10 @@ export const createTruckLoad = async (req, res) => {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const userTruckId = toNumberOrNull(req.body.user_truck_id);
     const vehicleId = toNumberOrNull(req.body.vehicle_id);
+    const vehicleContractorId = toNumberOrNull(req.body.vehicle_contractor_id);
     const toWarehouseId = toNumberOrNull(req.body.to_warehouse_id);
     const requestedDriverType = cleanCode(req.body.driver_type ?? req.body.truck_type)?.toUpperCase();
     const driverType = requestedDriverType === "EXTRA" || requestedDriverType === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE";
-    const driverName =
-      cleanDbText(req.body.driver_name) ||
-      [cleanDbText(req.body.driver_first_name), cleanDbText(req.body.driver_last_name)].filter(Boolean).join(" ") ||
-      null;
 
     if (!createdBy) {
       return res.status(401).json({
@@ -1263,14 +1236,21 @@ export const createTruckLoad = async (req, res) => {
     if (!userTruckId) {
       return res.status(400).json({
         success: false,
-        message: driverType === "CONTRACTOR" ? "กรุณาเลือก User Dummy" : "กรุณาเลือกพนักงานขับรถ",
+        message: driverType === "CONTRACTOR" ? "กรุณาเลือกคนขับและรถเสริม" : "กรุณาเลือกพนักงานขับรถ",
       });
     }
 
-    if (!vehicleId) {
+    if (driverType === "EMPLOYEE" && !vehicleId) {
       return res.status(400).json({
         success: false,
         message: "กรุณาเลือกรถ",
+      });
+    }
+
+    if (driverType === "CONTRACTOR" && !vehicleContractorId) {
+      return res.status(400).json({
+        success: false,
+        message: "กรุณาเลือกคนขับและรถเสริม",
       });
     }
 
@@ -1281,40 +1261,45 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    if (driverType === "CONTRACTOR" && !driverName) {
-      return res.status(400).json({
-        success: false,
-        message: "กรุณาระบุชื่อพนักงานขับรถ",
-      });
-    }
-
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
 
-    const expectedDriverRole = driverType === "CONTRACTOR" ? 12 : 7;
     const [[driverRows], [vehicleRows], [warehouseRows]] = await Promise.all([
       connection.query(
         `
-          SELECT id
+          SELECT id, first_name, last_name
           FROM um_users
           WHERE id = ?
-            AND role_id = ?
+            AND role_id = 7
+            AND COALESCE(employment_type, 'EMPLOYEE') = ?
             AND COALESCE(is_active, 1) = 1
           LIMIT 1
         `,
-        [userTruckId, expectedDriverRole],
+        [userTruckId, driverType],
       ),
       connection.query(
-        `
-          SELECT id
-          FROM mm_vehicles
-          WHERE id = ?
-            AND status = 'ACTIVE'
-            AND is_deleted = 'N'
-          LIMIT 1
-        `,
-        [vehicleId],
+        driverType === "CONTRACTOR"
+          ? `
+              SELECT id
+              FROM mm_vehicles_contractor
+              WHERE id = ?
+                AND user_truck_id = ?
+                AND is_deleted = 'N'
+              LIMIT 1
+              FOR UPDATE
+            `
+          : `
+              SELECT id
+              FROM mm_vehicles
+              WHERE id = ?
+                AND status = 'ACTIVE'
+                AND is_deleted = 'N'
+              LIMIT 1
+            `,
+        driverType === "CONTRACTOR"
+          ? [vehicleContractorId, userTruckId]
+          : [vehicleId],
       ),
       connection.query(
         `
@@ -1333,7 +1318,7 @@ export const createTruckLoad = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: driverType === "CONTRACTOR" ? "ไม่พบข้อมูล User Dummy" : "ไม่พบข้อมูลพนักงานขับรถ",
+        message: "ไม่พบข้อมูลคนขับที่เลือก",
       });
     }
 
@@ -1343,7 +1328,7 @@ export const createTruckLoad = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: "ไม่พบข้อมูลรถที่เลือก",
+        message: driverType === "CONTRACTOR" ? "ไม่พบข้อมูลรถเสริมที่เลือก" : "ไม่พบข้อมูลรถที่เลือก",
       });
     }
 
@@ -1358,6 +1343,9 @@ export const createTruckLoad = async (req, res) => {
     }
 
     const truckCode = await createTruckCode(connection);
+    const driverName = [driverRows[0].first_name, driverRows[0].last_name]
+      .filter(Boolean)
+      .join(" ") || null;
 
     const [result] = await connection.query(
       `
@@ -1369,12 +1357,13 @@ export const createTruckLoad = async (req, res) => {
           driver_type,
           driver_name,
           vehicle_id,
+          vehicle_contractor_id,
           status,
           warehouse_id,
           to_warehouse_id,
           note
         )
-        VALUES (?, NOW(), ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
+        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
       `,
       [
         truckCode,
@@ -1382,7 +1371,8 @@ export const createTruckLoad = async (req, res) => {
         userTruckId,
         driverType,
         driverName,
-        vehicleId,
+        driverType === "EMPLOYEE" ? vehicleId : null,
+        driverType === "CONTRACTOR" ? vehicleContractorId : null,
         warehouseId,
         toWarehouseId,
         cleanDbText(req.body.note),

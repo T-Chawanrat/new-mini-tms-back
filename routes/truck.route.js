@@ -9,7 +9,6 @@ import {
   getTruckLoadPrint,
   getTruckLoadById,
   getTruckLoadDrivers,
-  getTruckLoadDummyUsers,
   getTruckLoadProducts,
   getTruckLoads,
   loadTruckProduct,
@@ -21,7 +20,6 @@ const router = express.Router();
 
 router.get("/get-truck", auth, getTruckLoads);
 router.get("/drivers", auth, getTruckLoadDrivers);
-router.get("/dummy-users", auth, getTruckLoadDummyUsers);
 router.get("/get-truck/:truckLoadId", auth, getTruckLoadById);
 router.get("/:truckLoadId/print", auth, getTruckLoadPrint);
 router.get("/:truckLoadId/products", auth, getTruckLoadProducts);

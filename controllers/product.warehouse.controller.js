@@ -1,7 +1,17 @@
 import db from "../config/db.js";
+import { toNumberOrNull } from "../utils/cleanText.js";
 
-export const getProductWarehouses = async (_req, res) => {
+export const getProductWarehouses = async (req, res) => {
   try {
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "ไม่พบคลังของผู้ใช้งาน",
+      });
+    }
+
     const [rows] = await db.query(
       `
         SELECT
@@ -52,9 +62,11 @@ export const getProductWarehouses = async (_req, res) => {
         LEFT JOIN mm_warehouses_to warehouse_to
           ON warehouse_to.warehouse_id = product_warehouse.to_warehouse_id
         WHERE NULLIF(TRIM(receive_serial.receive_code), '') IS NOT NULL
+          AND product_warehouse.now_warehouse_id = ?
         GROUP BY receive_serial.receive_code
         ORDER BY MAX(product_warehouse.id) DESC
       `,
+      [warehouseId],
     );
 
     const [serialRows] = await db.query(
@@ -69,8 +81,10 @@ export const getProductWarehouses = async (_req, res) => {
           ON receive_serial.serial_id = product_warehouse.serial_id
           AND receive_serial.serial_no = product_warehouse.serial_no
         WHERE NULLIF(TRIM(receive_serial.receive_code), '') IS NOT NULL
+          AND product_warehouse.now_warehouse_id = ?
         ORDER BY receive_serial.receive_code, product_warehouse.serial_no
       `,
+      [warehouseId],
     );
 
     const serialItemsByReceiveCode = new Map();

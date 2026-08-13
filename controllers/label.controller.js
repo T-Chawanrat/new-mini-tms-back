@@ -507,6 +507,8 @@ export const markLabelsPrinted = async (req, res) => {
 
     const printType = is_reprint ? "REPRINT" : "PRINT";
 
+    const now = new Date();
+
     const insertValues = serialRows.map((row) => [
       row.receive_code || null,
       row.serial_id || null,
@@ -516,6 +518,7 @@ export const markLabelsPrinted = async (req, res) => {
       row.recipient_code || null,
       printedByUser,
       printType,
+      now,
     ]);
 
     await connection.query(
@@ -528,7 +531,8 @@ export const markLabelsPrinted = async (req, res) => {
           to_warehouse_id,
           recipient_code,
           printed_by_user,
-          print_type
+          print_type,
+          created_at
         )
         VALUES ?
       `,

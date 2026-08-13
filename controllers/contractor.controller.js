@@ -12,6 +12,17 @@ const positiveIdOrNull = (value) => {
   return Number.isInteger(id) && id > 0 ? id : null;
 };
 
+const resolveLookupId = async (connection, table, value, customName) => {
+  const requestedId = positiveIdOrNull(value);
+  if (requestedId) return requestedId;
+  const name = textOrNull(customName);
+  if (!name) return null;
+  const [[existing]] = await connection.query(`SELECT id FROM ${table} WHERE name = ? LIMIT 1`, [name]);
+  if (existing?.id) return existing.id;
+  const [result] = await connection.query(`INSERT INTO ${table} (name) VALUES (?)`, [name]);
+  return result.insertId;
+};
+
 export const getAvailableContractors = async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -99,6 +110,13 @@ export const createContractor = async (req, res) => {
       });
     }
 
+    if (vehicle.brand_id === "__OTHER__" && !textOrNull(vehicle.brand_name)) {
+      return res.status(400).json({ message: "กรุณาระบุยี่ห้อรถ" });
+    }
+    if (vehicle.vehicle_type_id === "__OTHER__" && !textOrNull(vehicle.vehicle_type_name)) {
+      return res.status(400).json({ message: "กรุณาระบุประเภทรถ" });
+    }
+
     if (!Number.isInteger(createdBy) || !Number.isInteger(warehouseId)) {
       return res.status(401).json({ message: "ข้อมูลผู้ใช้งานหรือคลังไม่ถูกต้อง" });
     }
@@ -121,6 +139,9 @@ export const createContractor = async (req, res) => {
       throw new Error("ไม่สามารถสร้างเลขผู้ใช้งานชั่วคราวได้ กรุณาลองใหม่");
     }
     hasRunningLock = true;
+
+    const brandId = await resolveLookupId(connection, "mm_vehicle_brands", vehicle.brand_id, vehicle.brand_name);
+    const vehicleTypeId = await resolveLookupId(connection, "mm_vehicle_types", vehicle.vehicle_type_id, vehicle.vehicle_type_name);
 
     const [[runningRow]] = await connection.query(
       `
@@ -220,10 +241,10 @@ export const createContractor = async (req, res) => {
         contractorUserId,
         licensePlate,
         provinceId,
-        positiveIdOrNull(vehicle.brand_id),
+        brandId,
         textOrNull(vehicle.model),
         textOrNull(vehicle.color),
-        positiveIdOrNull(vehicle.vehicle_type_id),
+        vehicleTypeId,
         vehicle.max_load_kg || null,
         textOrNull(vehicle.owner_name) || `${firstName} ${lastName}`,
         textOrNull(vehicle.owner_tel) || textOrNull(user.tel),

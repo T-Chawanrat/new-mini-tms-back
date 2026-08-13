@@ -93,6 +93,7 @@ export const createWarehouseReceive = async (req, res) => {
 
     connection = await db.getConnection();
     await connection.beginTransaction();
+    const now = new Date();
 
     const placeholders = serialNos.map(() => "?").join(", ");
 
@@ -202,11 +203,11 @@ export const createWarehouseReceive = async (req, res) => {
           pw.now_warehouse_id,
           pw.to_warehouse_id,
           ?,
-          NOW()
+          ?
         FROM tm_product_warehouses pw
         WHERE pw.serial_no IN (${placeholders})
       `,
-      [createdBy, ...serialNos],
+      [createdBy, now, ...serialNos],
     );
 
     /*
@@ -256,7 +257,7 @@ export const createWarehouseReceive = async (req, res) => {
           rs.serial_no,
           'พัสดุถึงศูนย์',
           4,
-          NOW(),
+          ?,
           NULL,
           'PUBLIC',
           ?,
@@ -295,7 +296,7 @@ export const createWarehouseReceive = async (req, res) => {
 
         WHERE rs.serial_no IN (${placeholders})
       `,
-      [warehouseId, createdBy, createdBy, warehouseId, ...serialNos],
+      [now, warehouseId, createdBy, createdBy, warehouseId, ...serialNos],
     );
 
     /*
@@ -319,8 +320,8 @@ export const createWarehouseReceive = async (req, res) => {
         SET
           transaction_last.status_message = 'พัสดุถึงศูนย์',
           transaction_last.status_id = 4,
-          transaction_last.datetime = NOW(),
-          transaction_last.update_date = NOW(),
+          transaction_last.datetime = ?,
+          transaction_last.update_date = ?,
           transaction_last.type = 'PUBLIC',
           transaction_last.warehouse_id = ?,
           transaction_last.created_by = ?,
@@ -342,7 +343,7 @@ export const createWarehouseReceive = async (req, res) => {
 
         WHERE rs.serial_no IN (${placeholders})
       `,
-      [createdBy, warehouseId, warehouseId, createdBy, ...serialNos],
+      [createdBy, warehouseId, now, now, warehouseId, createdBy, ...serialNos],
     );
 
     await connection.query(

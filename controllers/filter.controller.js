@@ -357,7 +357,7 @@ export const getProvinces = async (req, res) => {
           province_name
         FROM mm_province
         WHERE 1 = 1
-        ORDER BY id ASC
+        ORDER BY province_name ASC
       `,
     );
 

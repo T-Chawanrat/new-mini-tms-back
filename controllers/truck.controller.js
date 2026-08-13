@@ -74,6 +74,7 @@ const TRUCK_SELECT_FIELDS = `
   warehouse_to.warehouse_name AS to_warehouse_name,
 
   driver.employee_code,
+  driver.tel,
   COALESCE(
     NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''),
     t.driver_name
@@ -152,7 +153,7 @@ const syncTruckBoxCount = async (connection, truckLoadId) => {
   return countBox;
 };
 
-const writeTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage }) => {
+const writeTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage, now }) => {
   await connection.query(
     `
       INSERT INTO tm_product_transactions (
@@ -180,8 +181,10 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         username,
         truck_license_plate,
         user_id,
+        user_truck_id,
         truck_name,
         truck_id,
+        vehicle_contractor_id,
         truck_province,
         note,
         data_year,
@@ -195,7 +198,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         product_truck.serial_no,
         ?,
         ?,
-        NOW(),
+        ?,
         NULL,
         'PUBLIC',
         truck.warehouse_id,
@@ -212,8 +215,10 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         actor.username,
         COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
         truck.user_truck_id,
+        truck.user_truck_id,
         truck.truck_code,
-        COALESCE(truck.vehicle_id, truck.vehicle_contractor_id),
+        truck.vehicle_id,
+        truck.vehicle_contractor_id,
         COALESCE(plate_province.province_name, contractor_plate_province.province_name),
         NULL,
         YEAR(NOW()),
@@ -238,7 +243,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         AND rs.serial_no = product_truck.serial_no
       WHERE product_truck.truck_load_id = ?
     `,
-    [statusMessage, statusId, actorId, truckLoadId],
+    [statusMessage, statusId, now, actorId, truckLoadId],
   );
 
   await connection.query(
@@ -264,8 +269,8 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
       SET
         transaction_last.status_message = ?,
         transaction_last.status_id = ?,
-        transaction_last.datetime = NOW(),
-        transaction_last.update_date = NOW(),
+        transaction_last.datetime = ?,
+        transaction_last.update_date = ?,
         transaction_last.type = 'PUBLIC',
         transaction_last.warehouse_id = truck.warehouse_id,
         transaction_last.created_by = actor.id,
@@ -274,12 +279,14 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.username = actor.username,
         transaction_last.truck_license_plate = COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
         transaction_last.user_id = truck.user_truck_id,
+        transaction_last.user_truck_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
-        transaction_last.truck_id = COALESCE(truck.vehicle_id, truck.vehicle_contractor_id),
+        transaction_last.truck_id = truck.vehicle_id,
+        transaction_last.vehicle_contractor_id = truck.vehicle_contractor_id,
         transaction_last.truck_province = COALESCE(plate_province.province_name, contractor_plate_province.province_name)
       WHERE product_truck.truck_load_id = ?
     `,
-    [actorId, statusMessage, statusId, truckLoadId],
+    [actorId, statusMessage, statusId, now, now, truckLoadId],
   );
 };
 
@@ -572,6 +579,7 @@ export const loadTruckProduct = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const truckLoad = await getTruckLoadRow(connection, truckLoadId);
 
@@ -590,6 +598,7 @@ export const loadTruckProduct = async (req, res) => {
     const [warehouseRows] = await connection.query(
       `
         SELECT
+          pw.id AS product_warehouse_id,
           pw.serial_id,
           pw.serial_no,
           pw.now_warehouse_id,
@@ -683,7 +692,7 @@ export const loadTruckProduct = async (req, res) => {
         product.serial_no,
         truckLoad.user_truck_id,
         truckLoad.driver_name,
-        truckLoad.vehicle_id,
+        truckLoad.vehicle_id ?? truckLoad.vehicle_contractor_id,
         product.resend_date,
         truckLoadId,
         actorId,
@@ -710,7 +719,7 @@ export const loadTruckProduct = async (req, res) => {
           truck_to_warehouse_id,
           created_date
         )
-        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?, ?)
       `,
       [
         productTruckResult.insertId,
@@ -726,6 +735,26 @@ export const loadTruckProduct = async (req, res) => {
         destinationMatches ? "N" : "Y",
         product.to_warehouse_id,
         truckLoad.to_warehouse_id,
+        now,
+      ],
+    );
+
+    await connection.query(
+      `
+        INSERT INTO logs_product_warehouses (
+          product_warehouse_id, serial_id, serial_no, event_type,
+          now_warehouse_id, to_warehouse_id, created_by, created_date
+        )
+        VALUES (?, ?, ?, 'TRUCK_OUT', ?, ?, ?, ?)
+      `,
+      [
+        product.product_warehouse_id,
+        product.serial_id,
+        product.serial_no,
+        truckLoad.warehouse_id,
+        product.to_warehouse_id,
+        actorId,
+        now,
       ],
     );
 
@@ -741,6 +770,17 @@ export const loadTruckProduct = async (req, res) => {
         VALUES (?, ?, ?, NOW(), 'N')
       `,
       [truckLoadId, product.serial_id, product.serial_no],
+    );
+
+    await connection.query(
+      `
+        DELETE FROM tm_product_warehouses
+        WHERE serial_id = ?
+          AND serial_no = ?
+          AND now_warehouse_id = ?
+        LIMIT 1
+      `,
+      [product.serial_id, product.serial_no, truckLoad.warehouse_id],
     );
 
     await syncTruckBoxCount(connection, truckLoadId);
@@ -777,6 +817,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const [rows] = await connection.query(
       `
@@ -841,6 +882,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
         actorId,
         statusId: 8,
         statusMessage: "ปิดบรรทุก",
+        now,
       });
     }
     if (rows[0].is_go !== "Y") {
@@ -850,6 +892,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
         actorId,
         statusId: 5,
         statusMessage: "พัสดุออกจากศูนย์",
+        now,
       });
     }
 
@@ -961,6 +1004,7 @@ export const unloadTruckProduct = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const [productRows] = await connection.query(
       `
@@ -975,8 +1019,11 @@ export const unloadTruckProduct = async (req, res) => {
           COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
+          product_warehouse.resend_date,
+          COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id, truck.to_warehouse_id) AS restore_to_warehouse_id,
           product_warehouse.to_warehouse_id AS parcel_to_warehouse_id,
           truck.to_warehouse_id AS truck_to_warehouse_id
+          ,truck.warehouse_id AS from_warehouse_id
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
@@ -987,9 +1034,12 @@ export const unloadTruckProduct = async (req, res) => {
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = product_truck.serial_id
           AND product_warehouse.serial_no = product_truck.serial_no
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no = ?
-          AND product_truck.status = 'LOADED'
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
         ORDER BY product_warehouse.id DESC
         LIMIT 1
         FOR UPDATE
@@ -1010,6 +1060,54 @@ export const unloadTruckProduct = async (req, res) => {
       Number(productTruck.parcel_to_warehouse_id) !== Number(productTruck.truck_to_warehouse_id)
         ? "Y"
         : "N";
+
+    const [restoredWarehouseResult] = await connection.query(
+      `
+        INSERT INTO tm_product_warehouses (
+          serial_id,
+          serial_no,
+          now_warehouse_id,
+          to_warehouse_id,
+          resend_date,
+          created_by,
+          created_date
+        )
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [
+        productTruck.serial_id,
+        productTruck.serial_no,
+        productTruck.from_warehouse_id,
+        productTruck.restore_to_warehouse_id || productTruck.truck_to_warehouse_id,
+        productTruck.resend_date || null,
+        actorId,
+      ],
+    );
+
+    await connection.query(
+      `
+        INSERT INTO logs_product_warehouses (
+          product_warehouse_id,
+          serial_id,
+          serial_no,
+          event_type,
+          now_warehouse_id,
+          to_warehouse_id,
+          created_by,
+          created_date
+        )
+        VALUES (?, ?, ?, 'RECEIVE_IN', ?, ?, ?, ?)
+      `,
+      [
+        restoredWarehouseResult.insertId,
+        productTruck.serial_id,
+        productTruck.serial_no,
+        productTruck.from_warehouse_id,
+        productTruck.restore_to_warehouse_id || productTruck.truck_to_warehouse_id,
+        actorId,
+        now,
+      ],
+    );
 
     await connection.query(
       `DELETE FROM tm_truck_details WHERE truck_load_id = ? AND serial_no = ?`,
@@ -1040,7 +1138,7 @@ export const unloadTruckProduct = async (req, res) => {
           truck_to_warehouse_id,
           created_date
         )
-        VALUES (?, ?, ?, 'UNLOAD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, 'UNLOAD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         productTruck.id,
@@ -1057,6 +1155,7 @@ export const unloadTruckProduct = async (req, res) => {
         isDcMismatch,
         productTruck.parcel_to_warehouse_id,
         productTruck.truck_to_warehouse_id,
+        now,
       ],
     );
 
@@ -1089,6 +1188,7 @@ export const deleteTruckLoad = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const [truckRows] = await connection.query(
       `
@@ -1107,6 +1207,64 @@ export const deleteTruckLoad = async (req, res) => {
       transactionStarted = false;
       return res.status(404).json({ success: false, message: "ไม่พบใบปิดบรรทุก หรือใบนี้ถูกลบแล้ว" });
     }
+
+    await connection.query(
+      `
+        INSERT INTO tm_product_warehouses (
+          serial_id,
+          serial_no,
+          now_warehouse_id,
+          to_warehouse_id,
+          created_by,
+          created_date
+        )
+        SELECT
+          product_truck.serial_id,
+          product_truck.serial_no,
+          truck.warehouse_id,
+          COALESCE(receive_serial.to_warehouse_id, truck.to_warehouse_id),
+          ?,
+          NOW()
+        FROM tm_product_trucks product_truck
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
+        WHERE product_truck.truck_load_id = ?
+      `,
+      [actorId, truckLoadId],
+    );
+
+    await connection.query(
+      `
+        INSERT INTO logs_product_warehouses (
+          product_warehouse_id,
+          serial_id,
+          serial_no,
+          event_type,
+          now_warehouse_id,
+          to_warehouse_id,
+          created_by,
+          created_date
+        )
+        SELECT
+          product_warehouse.id,
+          product_warehouse.serial_id,
+          product_warehouse.serial_no,
+          'CANCEL_RETURN',
+          product_warehouse.now_warehouse_id,
+          product_warehouse.to_warehouse_id,
+          ?,
+          ?
+        FROM tm_product_warehouses product_warehouse
+        INNER JOIN tm_product_trucks product_truck
+          ON product_truck.serial_id = product_warehouse.serial_id
+          AND product_truck.serial_no = product_warehouse.serial_no
+        WHERE product_truck.truck_load_id = ?
+      `,
+      [actorId, now, truckLoadId],
+    );
 
     await connection.query(
       `
@@ -1132,7 +1290,7 @@ export const deleteTruckLoad = async (req, res) => {
           product_truck.id,
           product_truck.serial_id,
           product_truck.serial_no,
-          'UNLOAD',
+          'CANCEL',
           ?,
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
@@ -1150,7 +1308,7 @@ export const deleteTruckLoad = async (req, res) => {
           END,
           product_warehouse.to_warehouse_id,
           truck.to_warehouse_id,
-          NOW()
+          ?
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
@@ -1167,7 +1325,7 @@ export const deleteTruckLoad = async (req, res) => {
           )
         WHERE product_truck.truck_load_id = ?
       `,
-      [actorId, truckLoadId],
+      [actorId, now, truckLoadId],
     );
 
     await connection.query(

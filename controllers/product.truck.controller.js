@@ -35,9 +35,9 @@ export const getProductTrucks = async (_req, res) => {
           ) AS driver_name,
           driver.username AS driver_username,
 
-          vehicle.license_plate,
-          vehicle.license_plate_province,
-          vehicle.model AS vehicle_model,
+          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
+          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_plate_province,
+          COALESCE(vehicle.model, contractor_vehicle.model) AS vehicle_model,
 
           warehouse_from.warehouse_name AS warehouse_name,
           warehouse_to.warehouse_name AS to_warehouse_name,
@@ -60,6 +60,10 @@ export const getProductTrucks = async (_req, res) => {
           ON customer.id = receive_serial.customer_id
         LEFT JOIN mm_vehicles vehicle
           ON vehicle.id = product_truck.truck_id
+        LEFT JOIN mm_vehicles_contractor contractor_vehicle
+          ON contractor_vehicle.id = truck.vehicle_contractor_id
+        LEFT JOIN mm_province contractor_province
+          ON contractor_province.id = contractor_vehicle.license_plate_province_id
         LEFT JOIN mm_warehouses_to warehouse_from
           ON warehouse_from.warehouse_id = truck.warehouse_id
         LEFT JOIN mm_warehouses_to warehouse_to

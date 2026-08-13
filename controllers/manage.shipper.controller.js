@@ -401,6 +401,7 @@ export const createShipperROCode = async (req, res) => {
 
 export const updateShipperROCode = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -490,12 +491,12 @@ export const updateShipperROCode = async (req, res) => {
       SET
         ro_code = ?,
         ro_name = ?,
-        updated_at = NOW()
+        updated_at = ?
       WHERE ro_code_id = ?
         AND shipper_id = ?
         AND is_deleted = 'N'
       `,
-      [cleanROCode, cleanROName, ro_code_id, shipper_id],
+      [cleanROCode, cleanROName, now, ro_code_id, shipper_id],
     );
 
     res.json({
@@ -525,6 +526,7 @@ export const deleteShipperROCode = async (req, res) => {
 
     conn = await db.getConnection();
     await conn.beginTransaction();
+    const now = new Date();
 
     const [shipperRows] = await conn.query(
       `
@@ -571,12 +573,12 @@ export const deleteShipperROCode = async (req, res) => {
       UPDATE mm_shipper_ro_code
       SET
         is_deleted = 'Y',
-        updated_at = NOW()
+        updated_at = ?
       WHERE ro_code_id = ?
         AND shipper_id = ?
         AND is_deleted = 'N'
       `,
-      [ro_code_id, shipper_id],
+      [now, ro_code_id, shipper_id],
     );
 
     await conn.query(
@@ -584,11 +586,11 @@ export const deleteShipperROCode = async (req, res) => {
       UPDATE mm_shipper_ro_image
       SET
         is_deleted = 'Y',
-        updated_at = NOW()
+        updated_at = ?
       WHERE ro_code_id = ?
         AND is_deleted = 'N'
       `,
-      [ro_code_id],
+      [now, ro_code_id],
     );
 
     await conn.commit();

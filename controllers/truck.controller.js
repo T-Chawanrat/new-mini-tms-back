@@ -10,12 +10,15 @@ import {
 } from "../utils/cleanText.js";
 import { cleanYN, getPagination } from "../utils/truckUtils.js";
 
-const createTruckCode = async (connection) => {
-  const [dateRows] = await connection.query(`
-    SELECT DATE_FORMAT(CURRENT_DATE(), '%y%m%d') AS temporary_truck_code
-  `);
-
-  const temporaryTruckCodeDate = dateRows[0].temporary_truck_code;
+const createTruckCode = async (connection, now) => {
+  const dateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const getPart = (type) => dateParts.find((part) => part.type === type)?.value || "";
+  const temporaryTruckCodeDate = `${getPart("year")}${getPart("month")}${getPart("day")}`;
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const randomNumber = String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -154,6 +157,8 @@ const syncTruckBoxCount = async (connection, truckLoadId) => {
 };
 
 const writeTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage, now }) => {
+  const dataYear = now.getFullYear();
+  const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
   await connection.query(
     `
       INSERT INTO tm_product_transactions (
@@ -221,8 +226,8 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         truck.vehicle_contractor_id,
         COALESCE(plate_province.province_name, contractor_plate_province.province_name),
         NULL,
-        YEAR(NOW()),
-        CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
+        ?,
+        ?
       FROM tm_product_trucks product_truck
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
@@ -243,7 +248,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         AND rs.serial_no = product_truck.serial_no
       WHERE product_truck.truck_load_id = ?
     `,
-    [statusMessage, statusId, now, actorId, truckLoadId],
+    [statusMessage, statusId, now, dataYear, dataYearmonth, actorId, truckLoadId],
   );
 
   await connection.query(
@@ -685,7 +690,7 @@ export const loadTruckProduct = async (req, res) => {
           created_by,
           created_date
         )
-        VALUES (?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?)
       `,
       [
         product.serial_id,
@@ -696,6 +701,7 @@ export const loadTruckProduct = async (req, res) => {
         product.resend_date,
         truckLoadId,
         actorId,
+        now,
       ],
     );
 
@@ -767,9 +773,9 @@ export const loadTruckProduct = async (req, res) => {
           create_date,
           is_receive
         )
-        VALUES (?, ?, ?, NOW(), 'N')
+        VALUES (?, ?, ?, ?, 'N')
       `,
-      [truckLoadId, product.serial_id, product.serial_no],
+      [truckLoadId, product.serial_id, product.serial_no, now],
     );
 
     await connection.query(
@@ -862,14 +868,14 @@ export const closeAndGoTruckLoad = async (req, res) => {
             ELSE CONCAT('TK-', truck_code)
           END,
           close_by = COALESCE(close_by, ?),
-          close_datetime = COALESCE(close_datetime, NOW()),
+          close_datetime = COALESCE(close_datetime, ?),
           go_by = COALESCE(go_by, ?),
-          go_datetime = COALESCE(go_datetime, NOW()),
+          go_datetime = COALESCE(go_datetime, ?),
           is_close = 'Y',
           is_go = 'Y'
         WHERE id = ?
       `,
-      [actorId, actorId, truckLoadId],
+      [actorId, now, actorId, now, truckLoadId],
     );
     await connection.query(
       `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
@@ -1072,7 +1078,7 @@ export const unloadTruckProduct = async (req, res) => {
           created_by,
           created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         productTruck.serial_id,
@@ -1081,6 +1087,7 @@ export const unloadTruckProduct = async (req, res) => {
         productTruck.restore_to_warehouse_id || productTruck.truck_to_warehouse_id,
         productTruck.resend_date || null,
         actorId,
+        now,
       ],
     );
 
@@ -1224,7 +1231,7 @@ export const deleteTruckLoad = async (req, res) => {
           truck.warehouse_id,
           COALESCE(receive_serial.to_warehouse_id, truck.to_warehouse_id),
           ?,
-          NOW()
+          ?
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
@@ -1233,7 +1240,7 @@ export const deleteTruckLoad = async (req, res) => {
           AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
       `,
-      [actorId, truckLoadId],
+      [actorId, now, truckLoadId],
     );
 
     await connection.query(
@@ -1500,7 +1507,8 @@ export const createTruckLoad = async (req, res) => {
       });
     }
 
-    const truckCode = await createTruckCode(connection);
+    const now = new Date();
+    const truckCode = await createTruckCode(connection, now);
     const driverName = [driverRows[0].first_name, driverRows[0].last_name]
       .filter(Boolean)
       .join(" ") || null;
@@ -1521,10 +1529,11 @@ export const createTruckLoad = async (req, res) => {
           to_warehouse_id,
           note
         )
-        VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DC_TRUCK_DC', ?, ?, ?)
       `,
       [
         truckCode,
+        now,
         createdBy,
         userTruckId,
         driverType,

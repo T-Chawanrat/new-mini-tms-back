@@ -94,6 +94,8 @@ export const createWarehouseReceive = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     const now = new Date();
+    const dataYear = now.getFullYear();
+    const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
 
     const placeholders = serialNos.map(() => "?").join(", ");
 
@@ -284,8 +286,8 @@ export const createWarehouseReceive = async (req, res) => {
           NULL,
           NULL,
           NULL,
-          YEAR(NOW()),
-          CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED)
+          ?,
+          ?
         FROM tm_receive_serials rs
 
         INNER JOIN um_users actor
@@ -296,7 +298,7 @@ export const createWarehouseReceive = async (req, res) => {
 
         WHERE rs.serial_no IN (${placeholders})
       `,
-      [now, warehouseId, createdBy, createdBy, warehouseId, ...serialNos],
+      [now, warehouseId, createdBy, dataYear, dataYearmonth, createdBy, warehouseId, ...serialNos],
     );
 
     /*

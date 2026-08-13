@@ -123,11 +123,16 @@ export const createContractor = async (req, res) => {
 
     connection = await db.getConnection();
     await connection.beginTransaction();
+    const now = new Date();
 
-    const [[dateRow]] = await connection.query(
-      `SELECT DATE_FORMAT(CURDATE(), '%Y%m%d') AS date_code`,
-    );
-    const dateCode = String(dateRow.date_code);
+    const dateParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const getDatePart = (type) => dateParts.find((part) => part.type === type)?.value || "";
+    const dateCode = `${getDatePart("year")}${getDatePart("month")}${getDatePart("day")}`;
     runningLockName = `contractor_user_${dateCode}`;
 
     const [[lockRow]] = await connection.query(
@@ -186,7 +191,7 @@ export const createContractor = async (req, res) => {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONTRACTOR', ?, 1, ?, ?, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONTRACTOR', ?, 1, ?, ?, ?, ?)
       `,
       [
         employeeCode,
@@ -203,6 +208,8 @@ export const createContractor = async (req, res) => {
         warehouseId,
         licenseNo,
         licenseExpire,
+        now,
+        now,
       ],
     );
 
@@ -235,7 +242,7 @@ export const createContractor = async (req, res) => {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'N', NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?)
       `,
       [
         contractorUserId,
@@ -250,6 +257,8 @@ export const createContractor = async (req, res) => {
         textOrNull(vehicle.owner_tel) || textOrNull(user.tel),
         warehouseId,
         createdBy,
+        now,
+        now,
       ],
     );
 

@@ -192,7 +192,8 @@ export const selectWarehouse = async (req, res) => {
     const user = rows[0];
     const { zones, vehicles } = await getUserExtras(user);
 
-    await db.query("UPDATE um_users SET last_login = NOW() WHERE id = ?", [user.id]);
+    const now = new Date();
+    await db.query("UPDATE um_users SET last_login = ? WHERE id = ?", [now, user.id]);
 
     const token = jwt.sign(
       {
@@ -220,7 +221,7 @@ export const selectWarehouse = async (req, res) => {
         customer_id: user.customer_id,
         license_no: user.license_no,
         license_expire: user.license_expire,
-        last_login: new Date(),
+        last_login: now,
         zones,
         vehicles,
       },

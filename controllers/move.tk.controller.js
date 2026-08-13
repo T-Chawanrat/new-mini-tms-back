@@ -15,9 +15,9 @@ const TRUCK_LIST_SELECT = `
       truck.driver_name
     )
   END AS driver_name,
-  vehicle.license_plate,
-  vehicle.license_plate_province_id,
-  vehicle.license_plate_province AS license_province,
+  COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
+  COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
+  COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
   (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS count_box,
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name
@@ -33,6 +33,10 @@ const TRUCK_LIST_JOINS = `
     ON driver.id = truck.user_truck_id
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = truck.vehicle_id
+  LEFT JOIN mm_vehicles_contractor contractor_vehicle
+    ON contractor_vehicle.id = truck.vehicle_contractor_id
+  LEFT JOIN mm_province contractor_province
+    ON contractor_province.id = contractor_vehicle.license_plate_province_id
 `;
 
 const syncTruckCount = async (connection, truckLoadId) => {
@@ -121,18 +125,20 @@ export const getMoveTkProducts = async (req, res) => {
           product_truck.serial_id,
           product_truck.serial_no,
           truck.driver_type,
-          vehicle.license_plate,
-          vehicle.license_plate_province_id,
-          vehicle.license_plate_province AS license_province,
-          product_warehouse.to_warehouse_id,
+          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
+          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
+          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
+          COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
           destination.warehouse_name AS to_warehouse_name
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
           ON vehicle.id = product_truck.truck_id
-        LEFT JOIN mm_province plate_province
-          ON plate_province.id = vehicle.license_plate_province_id
+        LEFT JOIN mm_vehicles_contractor contractor_vehicle
+          ON contractor_vehicle.id = truck.vehicle_contractor_id
+        LEFT JOIN mm_province contractor_province
+          ON contractor_province.id = contractor_vehicle.license_plate_province_id
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.id = (
             SELECT MAX(latest_warehouse.id)
@@ -140,8 +146,11 @@ export const getMoveTkProducts = async (req, res) => {
             WHERE latest_warehouse.serial_id = product_truck.serial_id
               AND latest_warehouse.serial_no = product_truck.serial_no
           )
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
         LEFT JOIN mm_warehouses_to destination
-          ON destination.warehouse_id = product_warehouse.to_warehouse_id
+          ON destination.warehouse_id = COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id)
         WHERE product_truck.truck_load_id = ?
           AND truck.is_close = 'Y'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
@@ -169,6 +178,11 @@ export const moveTkProducts = async (req, res) => {
     const serialNos = Array.isArray(req.body.serial_nos)
       ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter(Boolean))]
       : [];
+    const confirmedMismatchSerialNos = new Set(
+      Array.isArray(req.body.confirmed_destination_mismatch_serial_nos)
+        ? req.body.confirmed_destination_mismatch_serial_nos.map((value) => cleanCode(value)).filter(Boolean)
+        : [],
+    );
 
     if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId) {
       return res.status(400).json({ success: false, message: "ข้อมูลการย้ายใบปิดบรรทุกไม่ถูกต้อง" });
@@ -177,10 +191,11 @@ export const moveTkProducts = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const [truckRows] = await connection.query(
       `
-        SELECT id, is_close
+        SELECT id, is_close, to_warehouse_id
         FROM tm_trucks
         WHERE id IN (?, ?)
           AND COALESCE(is_deleted, 'N') = 'N'
@@ -201,11 +216,24 @@ export const moveTkProducts = async (req, res) => {
     const placeholders = serialNos.map(() => "?").join(", ");
     const [productRows] = await connection.query(
       `
-        SELECT id, serial_no
-        FROM tm_product_trucks
-        WHERE truck_load_id = ?
-          AND serial_no IN (${placeholders})
-          AND status IN ('LOADED', 'DELIVERING')
+        SELECT
+          product_truck.id,
+          product_truck.serial_no,
+          COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id
+        FROM tm_product_trucks product_truck
+        LEFT JOIN tm_product_warehouses product_warehouse
+          ON product_warehouse.id = (
+            SELECT MAX(latest_warehouse.id)
+            FROM tm_product_warehouses latest_warehouse
+            WHERE latest_warehouse.serial_id = product_truck.serial_id
+              AND latest_warehouse.serial_no = product_truck.serial_no
+          )
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
+        WHERE product_truck.truck_load_id = ?
+          AND product_truck.serial_no IN (${placeholders})
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
         FOR UPDATE
       `,
       [sourceTruckLoadId, ...serialNos],
@@ -221,6 +249,24 @@ export const moveTkProducts = async (req, res) => {
         success: false,
         message: "พบ Serial No ที่ไม่ได้อยู่ในใบปิดบรรทุกต้นทาง",
         not_found_serial_nos: missingSerials,
+      });
+    }
+
+    const unconfirmedMismatches = productRows.filter(
+      (row) =>
+        row.to_warehouse_id !== null &&
+        targetTruck.to_warehouse_id !== null &&
+        Number(row.to_warehouse_id) !== Number(targetTruck.to_warehouse_id) &&
+        !confirmedMismatchSerialNos.has(String(row.serial_no)),
+    );
+
+    if (unconfirmedMismatches.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({
+        success: false,
+        message: "มีพัสดุที่ปลายทางไม่ตรงกับใบปิดบรรทุกปลายทาง",
+        destination_mismatch_serial_nos: unconfirmedMismatches.map((row) => row.serial_no),
       });
     }
 
@@ -303,7 +349,7 @@ export const moveTkProducts = async (req, res) => {
           END,
           product_warehouse.to_warehouse_id,
           target_truck.to_warehouse_id,
-          NOW()
+          ?
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks target_truck
           ON target_truck.id = product_truck.truck_load_id
@@ -321,7 +367,7 @@ export const moveTkProducts = async (req, res) => {
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no IN (${placeholders})
       `,
-      [actorId, targetTruckLoadId, ...serialNos],
+      [actorId, now, targetTruckLoadId, ...serialNos],
     );
 
     await syncTruckCount(connection, sourceTruckLoadId);

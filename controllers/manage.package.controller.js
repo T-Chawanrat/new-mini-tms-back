@@ -212,6 +212,7 @@ export const createPackage = async (req, res) => {
     }
 
     await conn.beginTransaction();
+    const now = new Date();
 
     const [[customer]] = await conn.query(
       `
@@ -262,13 +263,14 @@ export const createPackage = async (req, res) => {
           is_actived,
           pay_commission
         )
-        VALUES (?, ?, ?, 'N', ?, NOW(), ?, ?, 'Y', ?)
+        VALUES (?, ?, ?, 'N', ?, ?, ?, ?, 'Y', ?)
       `,
       [
         cleanCode(package_code),
         cleanValue(package_name),
         customer_id,
         req.user.id,
+        now,
         is_document_return || "N",
         customer.type,
         cleanValue(pay_commission),
@@ -309,6 +311,7 @@ export const updatePackage = async (req, res) => {
     }
 
     await conn.beginTransaction();
+    const now = new Date();
 
     const packageRow = await getPackageWithCustomer(id);
 
@@ -346,10 +349,10 @@ export const updatePackage = async (req, res) => {
           is_document_return = ?,
           pay_commission = ?,
           update_user_id = ?,
-          update_date = NOW()
+          update_date = ?
         WHERE package_id = ?
       `,
-      [cleanCode(package_code), cleanValue(package_name), is_document_return || "N", cleanValue(pay_commission), req.user.id, id],
+      [cleanCode(package_code), cleanValue(package_name), is_document_return || "N", cleanValue(pay_commission), req.user.id, now, id],
     );
 
     await conn.commit();
@@ -366,6 +369,7 @@ export const updatePackage = async (req, res) => {
 
 export const updatePackageStatus = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -389,10 +393,10 @@ export const updatePackageStatus = async (req, res) => {
         SET
           is_actived = ?,
           update_user_id = ?,
-          update_date = NOW()
+          update_date = ?
         WHERE package_id = ?
       `,
-      [is_actived, req.user.id, id],
+      [is_actived, req.user.id, now, id],
     );
 
     res.json({ message: "updated" });
@@ -404,6 +408,7 @@ export const updatePackageStatus = async (req, res) => {
 
 export const createPackageDetail = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -465,7 +470,7 @@ export const createPackageDetail = async (req, res) => {
             is_vat,
             package_id
           )
-          VALUES (?, ?, ?, 'N', ?, ?, ?, ?, ?, 'Y', ?, ?, NOW(), ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, 'N', ?, ?, ?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           cleanCode(package_detail_code) || null,
@@ -478,6 +483,7 @@ export const createPackageDetail = async (req, res) => {
           toNumberOrNull(cost),
           toNumberOrNull(cost_difference_warehouse),
           req.user.id,
+          now,
           is_document_return || "N",
           toNumberOrNull(cost_go),
           toNumberOrNull(cost_return),
@@ -547,6 +553,7 @@ export const createPackageDetail = async (req, res) => {
 
 export const updatePackageDetail = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -593,7 +600,7 @@ export const updatePackageDetail = async (req, res) => {
             cost = ?,
             cost_difference_warehouse = ?,
             update_user_id = ?,
-            updated_date = NOW(),
+            updated_date = ?,
             is_document_return = ?,
             cost_go = ?,
             cost_return = ?,
@@ -614,6 +621,7 @@ export const updatePackageDetail = async (req, res) => {
           toNumberOrNull(cost),
           toNumberOrNull(cost_difference_warehouse),
           req.user.id,
+          now,
           is_document_return || "N",
           toNumberOrNull(cost_go),
           toNumberOrNull(cost_return),

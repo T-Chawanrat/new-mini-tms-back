@@ -96,6 +96,7 @@ export const getHolidayById = async (req, res) => {
 
 export const createHoliday = async (req, res) => {
   try {
+    const now = new Date();
     const {
       holiday_date,
       holiday_name,
@@ -139,9 +140,9 @@ export const createHoliday = async (req, res) => {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, 'N', ?, NOW(), NOW())
+      VALUES (?, ?, ?, 'N', ?, ?, ?)
       `,
-      [holiday_date, holiday_name, remark, is_actived]
+      [holiday_date, holiday_name, remark, is_actived, now, now]
     );
 
     return res.status(201).json({
@@ -167,6 +168,7 @@ export const createHoliday = async (req, res) => {
 
 export const updateHoliday = async (req, res) => {
   try {
+    const now = new Date();
     const { id } = req.params;
 
     const {
@@ -228,11 +230,11 @@ export const updateHoliday = async (req, res) => {
         holiday_name = ?,
         remark = ?,
         is_actived = ?,
-        updated_at = NOW()
+        updated_at = ?
       WHERE id = ?
         AND is_deleted = 'N'
       `,
-      [holiday_date, holiday_name, remark, is_actived, id]
+      [holiday_date, holiday_name, remark, is_actived, now, id]
     );
 
     return res.json({
@@ -250,6 +252,7 @@ export const updateHoliday = async (req, res) => {
 
 export const deleteHoliday = async (req, res) => {
   try {
+    const now = new Date();
     const { id } = req.params;
 
     const [existingRows] = await db.query(
@@ -276,10 +279,10 @@ export const deleteHoliday = async (req, res) => {
       SET
         is_deleted = 'Y',
         is_actived = 'N',
-        updated_at = NOW()
+        updated_at = ?
       WHERE id = ?
       `,
-      [id]
+      [now, id]
     );
 
     return res.json({

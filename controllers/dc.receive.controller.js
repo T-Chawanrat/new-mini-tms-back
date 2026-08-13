@@ -79,6 +79,7 @@ export const createDcReceive = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const placeholders = serialNos.map(() => "?").join(", ");
     const [productRows] = await connection.query(
@@ -129,11 +130,11 @@ export const createDcReceive = async (req, res) => {
         SET
           product_warehouse.now_warehouse_id = ?,
           product_warehouse.created_by = ?,
-          product_warehouse.created_date = NOW()
+          product_warehouse.created_date = ?
         WHERE product_truck.serial_no IN (${placeholders})
           AND truck.to_warehouse_id = ?
       `,
-      [warehouseId, actorId, ...serialNos, warehouseId],
+      [warehouseId, actorId, now, ...serialNos, warehouseId],
     );
 
     await connection.query(
@@ -150,11 +151,11 @@ export const createDcReceive = async (req, res) => {
           product_warehouse.now_warehouse_id,
           product_warehouse.to_warehouse_id,
           ?,
-          NOW()
+          ?
         FROM tm_product_warehouses product_warehouse
         WHERE product_warehouse.serial_no IN (${placeholders})
       `,
-      [actorId, ...serialNos],
+      [actorId, now, ...serialNos],
     );
 
     await connection.query(
@@ -181,7 +182,7 @@ export const createDcReceive = async (req, res) => {
           CASE WHEN product_warehouse.to_warehouse_id <> truck.to_warehouse_id THEN 'Y' ELSE 'N' END,
           product_warehouse.to_warehouse_id,
           truck.to_warehouse_id,
-          NOW()
+          ?
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
@@ -192,7 +193,7 @@ export const createDcReceive = async (req, res) => {
           AND truck.to_warehouse_id = ?
           AND product_truck.status = 'DELIVERING'
       `,
-      [actorId, ...serialNos, warehouseId],
+      [actorId, now, ...serialNos, warehouseId],
     );
 
     await connection.query(
@@ -202,11 +203,11 @@ export const createDcReceive = async (req, res) => {
           ON product_truck.truck_load_id = detail.truck_load_id
           AND product_truck.serial_id = detail.serial_id
           AND product_truck.serial_no = detail.serial_no
-        SET detail.is_receive = 'Y', detail.receive_by = ?, detail.receive_date = NOW()
+        SET detail.is_receive = 'Y', detail.receive_by = ?, detail.receive_date = ?
         WHERE product_truck.serial_no IN (${placeholders})
           AND product_truck.status = 'DELIVERING'
       `,
-      [actorId, ...serialNos],
+      [actorId, now, ...serialNos],
     );
 
     await connection.query(

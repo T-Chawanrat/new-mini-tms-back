@@ -145,6 +145,7 @@ export const createUser = async (req, res) => {
 
     connection = await db.getConnection();
     await connection.beginTransaction();
+    const now = new Date();
 
     const [existsUsername] = await connection.query(
       `
@@ -238,7 +239,7 @@ export const createUser = async (req, res) => {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `,
       [
         employee_code || null,
@@ -256,6 +257,8 @@ export const createUser = async (req, res) => {
         finalWarehouse,
         role === 7 ? license_no : null,
         role === 7 ? formattedLicenseExpire : null,
+        now,
+        now,
       ],
     );
 
@@ -293,6 +296,7 @@ export const createUser = async (req, res) => {
 // UPDATE USER PROFILE / STATUS
 export const updateUser = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -312,10 +316,10 @@ export const updateUser = async (req, res) => {
         UPDATE um_users
         SET 
           is_active = ?,
-          updated_at = NOW()
+          updated_at = ?
         WHERE id = ?
         `,
-        [is_active, id],
+        [is_active, now, id],
       );
 
       return res.json({ message: "update status success" });
@@ -374,7 +378,7 @@ export const updateUser = async (req, res) => {
         tel = ?,
         license_no = ?,
         license_expire = ?,
-        updated_at = NOW()
+        updated_at = ?
       WHERE id = ?
       `,
       [
@@ -388,6 +392,7 @@ export const updateUser = async (req, res) => {
         tel || null,
         license_no || null,
         formattedLicenseExpire || null,
+        now,
         id,
       ],
     );
@@ -401,6 +406,7 @@ export const updateUser = async (req, res) => {
 
 export const changeMyPassword = async (req, res) => {
   try {
+    const now = new Date();
     if (!req.user) {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -474,10 +480,10 @@ export const changeMyPassword = async (req, res) => {
       UPDATE um_users
       SET 
         password = ?,
-        updated_at = NOW()
+        updated_at = ?
       WHERE id = ?
       `,
-      [new_password, userId],
+      [new_password, now, userId],
     );
 
     res.json({

@@ -75,6 +75,7 @@ export const createCustomerReceive = async (req, res) => {
     }
 
     await conn.beginTransaction();
+    const now = new Date();
 
     const [dup] = await conn.query(
       `
@@ -132,16 +133,17 @@ export const createCustomerReceive = async (req, res) => {
           updated_at
         )
         VALUES (
-          NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
           'N', 'N',
           ?, ?,
-          NOW(),
+          ?,
           ?, ?, ?, ?, ?, ?, ?,
-          NOW()
+          ?
         )
       `,
       [
+        now,
         cleanCode(receive_code),
         toNumberOrNull(req.user.customer_id),
 
@@ -170,6 +172,7 @@ export const createCustomerReceive = async (req, res) => {
 
         toNumberOrNull(from_warehouse_id),
         toNumberOrNull(to_warehouse_id),
+        now,
 
         yn(is_pickup_customer),
         yn(is_pickup_shipper),
@@ -180,6 +183,7 @@ export const createCustomerReceive = async (req, res) => {
         cleanCode(reference_no),
         yn(is_returned),
         cleanValue(remark),
+        now,
       ]
     );
 

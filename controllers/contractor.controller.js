@@ -127,36 +127,35 @@ export const createContractor = async (req, res) => {
 
     const dateParts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Bangkok",
-      year: "numeric",
+      year: "2-digit",
       month: "2-digit",
       day: "2-digit",
     }).formatToParts(now);
-    const getDatePart = (type) => dateParts.find((part) => part.type === type)?.value || "";
-    const dateCode = `${getDatePart("year")}${getDatePart("month")}${getDatePart("day")}`;
-    runningLockName = `contractor_user_${dateCode}`;
 
-    const [[lockRow]] = await connection.query(
-      `SELECT GET_LOCK(?, 10) AS lock_acquired`,
-      [runningLockName],
-    );
+    const getDatePart = (type) => dateParts.find((part) => part.type === type)?.value || "";
+
+    const dateCode = `${getDatePart("year")}${getDatePart("month")}${getDatePart("day")}`;
+
+    runningLockName = `contractor_user_RS${dateCode}`;
+
+    const [[lockRow]] = await connection.query(`SELECT GET_LOCK(?, 10) AS lock_acquired`, [runningLockName]);
 
     if (Number(lockRow.lock_acquired) !== 1) {
       throw new Error("ไม่สามารถสร้างเลขผู้ใช้งานชั่วคราวได้ กรุณาลองใหม่");
     }
-    hasRunningLock = true;
 
-    const brandId = await resolveLookupId(connection, "mm_vehicle_brands", vehicle.brand_id, vehicle.brand_name);
-    const vehicleTypeId = await resolveLookupId(connection, "mm_vehicle_types", vehicle.vehicle_type_id, vehicle.vehicle_type_name);
+    hasRunningLock = true;
 
     const [[runningRow]] = await connection.query(
       `
-        SELECT COALESCE(MAX(CAST(RIGHT(username, 2) AS UNSIGNED)), 0) AS last_no
-        FROM um_users
-        WHERE username LIKE ?
-          AND CHAR_LENGTH(username) = 11
-      `,
-      [`T${dateCode}%`],
+    SELECT COALESCE(MAX(CAST(RIGHT(username, 2) AS UNSIGNED)), 0) AS last_no
+    FROM um_users
+    WHERE username LIKE ?
+      AND CHAR_LENGTH(username) = 10
+  `,
+      [`RS${dateCode}%`],
     );
+
     const nextRunning = Number(runningRow.last_no) + 1;
 
     if (nextRunning > 99) {
@@ -166,7 +165,7 @@ export const createContractor = async (req, res) => {
       });
     }
 
-    const username = `T${dateCode}${String(nextRunning).padStart(2, "0")}`;
+    const username = `RS${dateCode}${String(nextRunning).padStart(2, "0")}`;
     const employeeCode = username;
 
     const [userResult] = await connection.query(

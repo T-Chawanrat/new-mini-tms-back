@@ -82,6 +82,10 @@ const TRUCK_SELECT_FIELDS = `
     NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''),
     t.driver_name
   ) AS driver_name,
+  NULLIF(
+    TRIM(CONCAT_WS(' ', NULLIF(closer.first_name, ''), NULLIF(closer.last_name, ''))),
+    ''
+  ) AS closed_by_name,
 
   COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
   COALESCE(vehicle.license_plate_province, contractor_plate_province.province_name) AS license_province,
@@ -101,6 +105,8 @@ const TRUCK_FROM_JOINS = `
     ON warehouse_to.warehouse_id = t.to_warehouse_id
   LEFT JOIN um_users driver
     ON driver.id = t.user_truck_id
+  LEFT JOIN um_users closer
+    ON closer.id = t.close_by
   LEFT JOIN mm_vehicles vehicle
     ON vehicle.id = t.vehicle_id
   LEFT JOIN mm_vehicles_contractor contractor_vehicle
@@ -937,30 +943,21 @@ export const getTruckLoadPrint = async (req, res) => {
     const [items] = await db.query(
       `
         SELECT
-          detail.id,
-          detail.serial_id,
-          detail.serial_no,
-          detail.create_date,
-          receive_data.cost,
-          receive_data.receive_code,
-          receive_data.customer_id,
-          customer.name AS customer_name,
-          receive_data.to_warehouse_id,
-          destination.warehouse_name AS to_warehouse_name,
-          receive_data.recipient_name,
-          receive_data.tel,
-          receive_data.address,
-          receive_data.subdistrict_name,
-          receive_data.district_name,
-          receive_data.province_name,
-          receive_data.zip_code,
-          receive_data.weight,
-          receive_data.qty
+          MIN(detail.id) AS id,
+          MIN(detail.serial_id) AS serial_id,
+          MIN(detail.serial_no) AS serial_no,
+          MAX(detail.create_date) AS create_date,
+          MAX(receive_data.receive_code) AS receive_code,
+          MAX(customer.name) AS customer_name,
+          MAX(receive_data.recipient_name) AS recipient_name,
+          GROUP_CONCAT(DISTINCT reference_data.reference_no ORDER BY reference_data.reference_no SEPARATOR ', ') AS reference_no,
+          COUNT(DISTINCT detail.serial_no) AS qty
         FROM tm_truck_details detail
         LEFT JOIN (
           SELECT
             serial_id,
             MAX(receive_code) AS receive_code,
+            MAX(receive_business_id) AS receive_business_id,
             MAX(customer_id) AS customer_id,
             MAX(to_warehouse_id) AS to_warehouse_id,
             MAX(recipient_name) AS recipient_name,
@@ -977,12 +974,13 @@ export const getTruckLoadPrint = async (req, res) => {
           GROUP BY serial_id
         ) receive_data
           ON receive_data.serial_id = detail.serial_id
+        LEFT JOIN tm_receive_references reference_data
+          ON reference_data.receive_id = receive_data.receive_business_id
         LEFT JOIN mm_customers customer
           ON customer.id = receive_data.customer_id
-        LEFT JOIN mm_warehouses_to destination
-          ON destination.warehouse_id = receive_data.to_warehouse_id
         WHERE detail.truck_load_id = ?
-        ORDER BY detail.id ASC
+        GROUP BY receive_data.receive_business_id, receive_data.receive_code
+        ORDER BY MIN(detail.id) ASC
       `,
       [truckLoadId],
     );

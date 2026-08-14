@@ -1,7 +1,17 @@
 import db from "../config/db.js";
+import { toNumberOrNull } from "../utils/cleanText.js";
 
-export const getProductTrucks = async (_req, res) => {
+export const getProductTrucks = async (req, res) => {
   try {
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "ไม่พบคลังของผู้ใช้งาน",
+      });
+    }
+
     const [rows] = await db.query(
       `
         SELECT
@@ -69,8 +79,11 @@ export const getProductTrucks = async (_req, res) => {
         LEFT JOIN mm_warehouses_to warehouse_to
           ON warehouse_to.warehouse_id = truck.to_warehouse_id
         WHERE COALESCE(truck.is_deleted, 'N') = 'N'
+          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND (truck.warehouse_id = ? OR truck.to_warehouse_id = ?)
         ORDER BY product_truck.created_date DESC, product_truck.id DESC
       `,
+      [warehouseId, warehouseId],
     );
 
     return res.status(200).json({

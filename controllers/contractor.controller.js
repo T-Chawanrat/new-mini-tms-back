@@ -7,6 +7,13 @@ const textOrNull = (value) => {
   return text || null;
 };
 
+const genderFromTitle = (titleName) => {
+  const title = textOrNull(titleName);
+  if (title === "นาย") return "ชาย";
+  if (title === "นาง" || title === "นางสาว") return "หญิง";
+  return null;
+};
+
 const positiveIdOrNull = (value) => {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : null;
@@ -80,6 +87,8 @@ export const createContractor = async (req, res) => {
 
     const firstName = textOrNull(user.first_name);
     const lastName = textOrNull(user.last_name);
+    const titleName = textOrNull(user.title_name);
+    const gender = genderFromTitle(titleName);
     const tel = textOrNull(user.tel);
     const licenseNo = textOrNull(user.license_no);
     const licenseExpire = textOrNull(user.license_expire);
@@ -92,9 +101,9 @@ export const createContractor = async (req, res) => {
       });
     }
 
-    if (!tel || !/^\d{9,10}$/.test(tel)) {
+    if (!tel || !/^0\d{8,9}$/.test(tel)) {
       return res.status(400).json({
-        message: "กรุณากรอกเบอร์โทร 9-10 หลักสำหรับใช้เป็น password",
+        message: "กรุณากรอกเบอร์โทรที่ขึ้นต้นด้วย 0 จำนวน 9-10 หลักสำหรับใช้เป็น password",
       });
     }
 
@@ -124,6 +133,18 @@ export const createContractor = async (req, res) => {
     connection = await db.getConnection();
     await connection.beginTransaction();
     const now = new Date();
+    const brandId = await resolveLookupId(
+      connection,
+      "mm_vehicle_brands",
+      vehicle.brand_id,
+      vehicle.brand_name,
+    );
+    const vehicleTypeId = await resolveLookupId(
+      connection,
+      "mm_vehicle_types",
+      vehicle.vehicle_type_id,
+      vehicle.vehicle_type_name,
+    );
 
     const dateParts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Bangkok",
@@ -196,10 +217,10 @@ export const createContractor = async (req, res) => {
         employeeCode,
         username,
         tel,
-        textOrNull(user.title_name),
+        titleName,
         firstName,
         lastName,
-        textOrNull(user.gender),
+        gender,
         textOrNull(user.citizen_id),
         textOrNull(user.email),
         tel,

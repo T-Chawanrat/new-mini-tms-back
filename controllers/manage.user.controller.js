@@ -2,6 +2,11 @@ import db from "../config/db.js";
 import { formatDateOnly } from "../utils/formatDate.js";
 import { buildLike } from "../utils/cleanText.js";
 
+const isValidPhoneNumber = (value) => {
+  const phone = String(value ?? "").trim();
+  return phone === "" || /^0\d+$/.test(phone);
+};
+
 // GET ALL USERS
 export const getUsers = async (req, res) => {
   try {
@@ -130,6 +135,10 @@ export const createUser = async (req, res) => {
 
     const defaultPassword = "123456";
     const role = Number(role_id);
+
+    if (!isValidPhoneNumber(tel)) {
+      return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
+    }
 
     if (!username) {
       return res.status(400).json({
@@ -304,6 +313,10 @@ export const updateUser = async (req, res) => {
     const { id } = req.params;
 
     const { employee_code, title_name, first_name, last_name, gender, citizen_id, email, tel, license_no, license_expire, is_active } = req.body;
+
+    if (!isValidPhoneNumber(tel)) {
+      return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
+    }
 
     if (!id) {
       return res.status(400).json({ message: "id required" });

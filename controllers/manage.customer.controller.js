@@ -1,5 +1,11 @@
 import db from "../config/db.js";
+
 import { buildLike } from "../utils/cleanText.js";
+
+const isValidPhoneNumber = (value) => {
+  const phone = String(value ?? "").trim();
+  return phone === "" || /^0\d+$/.test(phone);
+};
 
 /* ================= CUSTOMER ================= */
 
@@ -46,6 +52,10 @@ export const createCustomer = async (req, res) => {
 
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
+
+    if (!isValidPhoneNumber(tel) || !isValidPhoneNumber(contact_tel)) {
+      return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
+    }
 
       if (!code || !name) {
         return res.status(400).json({
@@ -113,6 +123,10 @@ export const updateCustomer = async (req, res) => {
 
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
+
+    if (!isValidPhoneNumber(tel) || !isValidPhoneNumber(contact_tel)) {
+      return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
+    }
 
     const customerType = type || "BUSINESS";
 

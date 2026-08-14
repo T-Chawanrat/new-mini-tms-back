@@ -950,14 +950,12 @@ export const getTruckLoadPrint = async (req, res) => {
           MAX(receive_data.receive_code) AS receive_code,
           MAX(customer.name) AS customer_name,
           MAX(receive_data.recipient_name) AS recipient_name,
-          GROUP_CONCAT(DISTINCT reference_data.reference_no ORDER BY reference_data.reference_no SEPARATOR ', ') AS reference_no,
           COUNT(DISTINCT detail.serial_no) AS qty
         FROM tm_truck_details detail
         LEFT JOIN (
           SELECT
             serial_id,
             MAX(receive_code) AS receive_code,
-            MAX(receive_business_id) AS receive_business_id,
             MAX(customer_id) AS customer_id,
             MAX(to_warehouse_id) AS to_warehouse_id,
             MAX(recipient_name) AS recipient_name,
@@ -974,12 +972,10 @@ export const getTruckLoadPrint = async (req, res) => {
           GROUP BY serial_id
         ) receive_data
           ON receive_data.serial_id = detail.serial_id
-        LEFT JOIN tm_receive_references reference_data
-          ON reference_data.receive_id = receive_data.receive_business_id
         LEFT JOIN mm_customers customer
           ON customer.id = receive_data.customer_id
         WHERE detail.truck_load_id = ?
-        GROUP BY receive_data.receive_business_id, receive_data.receive_code
+        GROUP BY receive_data.receive_code
         ORDER BY MIN(detail.id) ASC
       `,
       [truckLoadId],

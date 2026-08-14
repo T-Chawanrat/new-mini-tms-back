@@ -1,5 +1,7 @@
 import db from "../config/db.js";
 
+const truckPlateTypeIds = new Set(["3", "4"]);
+
 const CONTRACTOR_ROLE_ID = 7;
 
 const textOrNull = (value) => {
@@ -94,6 +96,7 @@ export const createContractor = async (req, res) => {
     const licenseExpire = textOrNull(user.license_expire);
     const licensePlate = textOrNull(vehicle.license_plate);
     const provinceId = positiveIdOrNull(vehicle.license_plate_province_id);
+    const isTruckPlate = truckPlateTypeIds.has(String(vehicle.vehicle_type_id));
 
     if (!firstName || !lastName) {
       return res.status(400).json({
@@ -124,6 +127,14 @@ export const createContractor = async (req, res) => {
     }
     if (vehicle.vehicle_type_id === "__OTHER__" && !textOrNull(vehicle.vehicle_type_name)) {
       return res.status(400).json({ message: "กรุณาระบุประเภทรถ" });
+    }
+
+    if (isTruckPlate && !/^\d{2}-\d{4}$/.test(licensePlate || "")) {
+      return res.status(400).json({ message: "รถบรรทุก 6 ล้อและ 10 ล้อ ต้องใช้ทะเบียนรูปแบบ 71-4585" });
+    }
+
+    if (!isTruckPlate && licensePlate?.includes("-")) {
+      return res.status(400).json({ message: "ทะเบียนรถประเภทนี้ห้ามมีเครื่องหมาย -" });
     }
 
     if (!Number.isInteger(createdBy) || !Number.isInteger(warehouseId)) {

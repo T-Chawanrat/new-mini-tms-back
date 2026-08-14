@@ -7,6 +7,12 @@ const isValidPhoneNumber = (value) => {
   return phone === "" || /^0\d+$/.test(phone);
 };
 
+const genderFromTitle = (titleName) => {
+  if (titleName === "นาย") return "ชาย";
+  if (titleName === "นาง" || titleName === "นางสาว") return "หญิง";
+  return null;
+};
+
 // GET ALL USERS
 export const getUsers = async (req, res) => {
   try {
@@ -121,7 +127,6 @@ export const createUser = async (req, res) => {
       title_name,
       first_name,
       last_name,
-      gender,
       citizen_id,
       email,
       tel,
@@ -135,6 +140,7 @@ export const createUser = async (req, res) => {
 
     const defaultPassword = "123456";
     const role = Number(role_id);
+    const resolvedGender = genderFromTitle(title_name);
 
     if (!isValidPhoneNumber(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
@@ -257,7 +263,7 @@ export const createUser = async (req, res) => {
         title_name || null,
         first_name || null,
         last_name || null,
-        gender || null,
+        resolvedGender,
         citizen_id || null,
         email || null,
         tel || null,
@@ -312,7 +318,8 @@ export const updateUser = async (req, res) => {
 
     const { id } = req.params;
 
-    const { employee_code, title_name, first_name, last_name, gender, citizen_id, email, tel, license_no, license_expire, is_active } = req.body;
+    const { employee_code, title_name, first_name, last_name, citizen_id, email, tel, license_no, license_expire, is_active } = req.body;
+    const resolvedGender = genderFromTitle(title_name);
 
     if (!isValidPhoneNumber(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
@@ -399,7 +406,7 @@ export const updateUser = async (req, res) => {
         title_name || null,
         first_name || null,
         last_name || null,
-        gender || null,
+        resolvedGender,
         citizen_id || null,
         email || null,
         tel || null,

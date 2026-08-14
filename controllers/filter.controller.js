@@ -297,7 +297,7 @@ export const getVehicleBrands = async (req, res) => {
 export const getVehicleTypes = async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT id, name
+      SELECT id, name, default_max_load_kg
       FROM mm_vehicle_types
       ORDER BY id ASC
     `);

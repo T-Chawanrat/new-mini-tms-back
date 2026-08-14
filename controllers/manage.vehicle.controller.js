@@ -1,7 +1,44 @@
 import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
-import { normalizePlate, isValidPlate } from "../utils/plate.js";
+import { isValidPlate } from "../utils/plate.js";
 import { formatDateOnly } from "../utils/formatDate.js";
+
+const truckPlateTypeIds = new Set(["3", "4"]);
+
+const getPlateFormatError = (plate, vehicleTypeId) => {
+  const isTruck = truckPlateTypeIds.has(String(vehicleTypeId));
+
+  if (isTruck && !/^\d{2}-\d{4}$/.test(plate)) {
+    return "รถบรรทุก 6 ล้อและ 10 ล้อ ต้องใช้ทะเบียนรูปแบบ 71-4585";
+  }
+
+  if (!isTruck && plate.includes("-")) {
+    return "ทะเบียนรถประเภทนี้ห้ามมีเครื่องหมาย -";
+  }
+
+  return null;
+};
+
+const resolveBrandId = async (brandId, brandName) => {
+  if (brandId !== "__OTHER__") return brandId;
+
+  const name = String(brandName ?? "").trim();
+  if (!name) return null;
+
+  const [existingRows] = await db.query(
+    "SELECT id FROM mm_vehicle_brands WHERE name = ? LIMIT 1",
+    [name],
+  );
+
+  if (existingRows.length) return existingRows[0].id;
+
+  const [result] = await db.query(
+    "INSERT INTO mm_vehicle_brands (name) VALUES (?)",
+    [name],
+  );
+
+  return result.insertId;
+};
 
 export const getVehicles = async (req, res) => {
   try {
@@ -121,6 +158,7 @@ export const createVehicle = async (req, res) => {
       license_plate,
       license_plate_province_id,
       brand_id,
+      brand_name,
       model,
       color,
       vehicle_year,
@@ -137,7 +175,7 @@ export const createVehicle = async (req, res) => {
       engine_no,
     } = req.body;
 
-    const plate = normalizePlate(license_plate);
+    const plate = String(license_plate ?? "").trim().replace(/\s+/g, "");
 
     if (!plate) {
       return res.status(400).json({ message: "license_plate required" });
@@ -157,8 +195,17 @@ export const createVehicle = async (req, res) => {
       return res.status(400).json({ message: "brand_id required" });
     }
 
+    if (brand_id === "__OTHER__" && !String(brand_name ?? "").trim()) {
+      return res.status(400).json({ message: "กรุณากรอกยี่ห้อรถ" });
+    }
+
     if (!vehicle_type_id) {
       return res.status(400).json({ message: "vehicle_type_id required" });
+    }
+
+    const plateFormatError = getPlateFormatError(plate, vehicle_type_id);
+    if (plateFormatError) {
+      return res.status(400).json({ message: plateFormatError });
     }
 
     if (!capacity_kg) {
@@ -196,6 +243,7 @@ export const createVehicle = async (req, res) => {
     }
 
     const licensePlateProvince = provinceRows[0].province_name;
+    const resolvedBrandId = await resolveBrandId(brand_id, brand_name);
 
     const [result] = await db.query(
       `
@@ -225,7 +273,7 @@ export const createVehicle = async (req, res) => {
         plate,
         license_plate_province_id,
         licensePlateProvince,
-        brand_id,
+        resolvedBrandId,
         model || null,
         color || null,
         vehicle_year || null,
@@ -277,6 +325,7 @@ export const updateVehicle = async (req, res) => {
       license_plate,
       license_plate_province_id,
       brand_id,
+      brand_name,
       model,
       color,
       vehicle_year,
@@ -293,7 +342,7 @@ export const updateVehicle = async (req, res) => {
       engine_no,
     } = req.body;
 
-    const plate = normalizePlate(license_plate);
+    const plate = String(license_plate ?? "").trim().replace(/\s+/g, "");
 
     if (!plate) {
       return res.status(400).json({ message: "license_plate required" });
@@ -313,8 +362,17 @@ export const updateVehicle = async (req, res) => {
       return res.status(400).json({ message: "brand_id required" });
     }
 
+    if (brand_id === "__OTHER__" && !String(brand_name ?? "").trim()) {
+      return res.status(400).json({ message: "กรุณากรอกยี่ห้อรถ" });
+    }
+
     if (!vehicle_type_id) {
       return res.status(400).json({ message: "vehicle_type_id required" });
+    }
+
+    const plateFormatError = getPlateFormatError(plate, vehicle_type_id);
+    if (plateFormatError) {
+      return res.status(400).json({ message: plateFormatError });
     }
 
     if (!capacity_kg) {
@@ -352,6 +410,7 @@ export const updateVehicle = async (req, res) => {
     }
 
     const licensePlateProvince = provinceRows[0].province_name;
+    const resolvedBrandId = await resolveBrandId(brand_id, brand_name);
 
     const [result] = await db.query(
       `
@@ -382,7 +441,7 @@ export const updateVehicle = async (req, res) => {
         plate,
         license_plate_province_id,
         licensePlateProvince,
-        brand_id,
+        resolvedBrandId,
         model || null,
         color || null,
         vehicle_year || null,

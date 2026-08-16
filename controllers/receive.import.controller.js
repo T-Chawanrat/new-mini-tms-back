@@ -107,6 +107,7 @@ export const importReceivesFromExcel = async (req, res) => {
     });
 
     const importDate = new Date();
+    const now = new Date();
 
     for (const [noBill, billRows] of billGroups) {
       validateSameBillHeader(billRows);
@@ -197,6 +198,7 @@ export const importReceivesFromExcel = async (req, res) => {
         conn,
         receiveId,
         createdBy: userId,
+        now,
       });
 
       await insertReceiveCreationLog({

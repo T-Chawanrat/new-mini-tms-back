@@ -65,16 +65,25 @@ const syncTruckCount = async (connection, truckLoadId) => {
   );
 };
 
-export const getMoveTkSourceTrucks = async (_req, res) => {
+export const getMoveTkSourceTrucks = async (req, res) => {
   try {
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+
+    if (!warehouseId) {
+      return res.status(401).json({ success: false, message: "ไม่พบ Warehouse ที่เลือก" });
+    }
+
     const [rows] = await db.query(
       `
         SELECT ${TRUCK_LIST_SELECT}
         ${TRUCK_LIST_JOINS}
         WHERE truck.is_close = 'Y'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
+          AND COALESCE(truck.is_arrived, 'N') <> 'Y'
+          AND truck.warehouse_id = ?
         ORDER BY truck.create_date DESC, truck.id DESC
       `,
+      [warehouseId],
     );
 
     return res.status(200).json({ success: true, data: rows });
@@ -87,20 +96,32 @@ export const getMoveTkSourceTrucks = async (_req, res) => {
 export const getMoveTkTargetTrucks = async (req, res) => {
   try {
     const sourceTruckLoadId = toNumberOrNull(req.query.source_truck_load_id);
-    const params = [];
-    const sourceCondition = sourceTruckLoadId ? "AND truck.id <> ?" : "";
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
 
-    if (sourceTruckLoadId) params.push(sourceTruckLoadId);
+    if (!warehouseId) {
+      return res.status(401).json({ success: false, message: "ไม่พบ Warehouse ที่เลือก" });
+    }
+
+    if (!sourceTruckLoadId) {
+      return res.status(200).json({ success: true, data: [] });
+    }
 
     const [rows] = await db.query(
       `
         SELECT ${TRUCK_LIST_SELECT}
         ${TRUCK_LIST_JOINS}
+        INNER JOIN tm_trucks source_truck
+          ON source_truck.id = ?
+          AND COALESCE(source_truck.is_deleted, 'N') = 'N'
+          AND COALESCE(source_truck.is_arrived, 'N') <> 'Y'
+          AND source_truck.warehouse_id = ?
         WHERE COALESCE(truck.is_deleted, 'N') = 'N'
-          ${sourceCondition}
+          AND COALESCE(truck.is_arrived, 'N') <> 'Y'
+          AND truck.id <> source_truck.id
+          AND truck.warehouse_id = source_truck.warehouse_id
         ORDER BY truck.create_date DESC, truck.id DESC
       `,
-      params,
+      [sourceTruckLoadId, warehouseId],
     );
 
     return res.status(200).json({ success: true, data: rows });
@@ -113,8 +134,9 @@ export const getMoveTkTargetTrucks = async (req, res) => {
 export const getMoveTkProducts = async (req, res) => {
   try {
     const truckLoadId = toNumberOrNull(req.params.truckLoadId);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
 
-    if (!truckLoadId) {
+    if (!truckLoadId || !warehouseId) {
       return res.status(400).json({ success: false, message: "truck_load_id ไม่ถูกต้อง" });
     }
 
@@ -154,10 +176,12 @@ export const getMoveTkProducts = async (req, res) => {
         WHERE product_truck.truck_load_id = ?
           AND truck.is_close = 'Y'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
+          AND COALESCE(truck.is_arrived, 'N') <> 'Y'
+          AND truck.warehouse_id = ?
           AND product_truck.status IN ('LOADED', 'DELIVERING')
         ORDER BY product_truck.id ASC
       `,
-      [truckLoadId],
+      [truckLoadId, warehouseId],
     );
 
     return res.status(200).json({ success: true, data: rows });
@@ -175,6 +199,7 @@ export const moveTkProducts = async (req, res) => {
     const sourceTruckLoadId = toNumberOrNull(req.body.source_truck_load_id);
     const targetTruckLoadId = toNumberOrNull(req.body.target_truck_load_id);
     const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const serialNos = Array.isArray(req.body.serial_nos)
       ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter(Boolean))]
       : [];
@@ -184,7 +209,7 @@ export const moveTkProducts = async (req, res) => {
         : [],
     );
 
-    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId) {
+    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId || !warehouseId) {
       return res.status(400).json({ success: false, message: "ข้อมูลการย้ายใบปิดบรรทุกไม่ถูกต้อง" });
     }
 
@@ -195,10 +220,11 @@ export const moveTkProducts = async (req, res) => {
 
     const [truckRows] = await connection.query(
       `
-        SELECT id, is_close, to_warehouse_id
+        SELECT id, is_close, to_warehouse_id, warehouse_id
         FROM tm_trucks
         WHERE id IN (?, ?)
           AND COALESCE(is_deleted, 'N') = 'N'
+          AND COALESCE(is_arrived, 'N') <> 'Y'
         FOR UPDATE
       `,
       [sourceTruckLoadId, targetTruckLoadId],
@@ -211,6 +237,18 @@ export const moveTkProducts = async (req, res) => {
       await connection.rollback();
       transactionStarted = false;
       return res.status(400).json({ success: false, message: "ไม่พบใบต้นทาง/ปลายทาง หรือใบต้นทางยังไม่ปิดบรรทุก" });
+    }
+
+    if (Number(sourceTruck.warehouse_id) !== Number(targetTruck.warehouse_id)) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ success: false, message: "ใบปลายทางต้องอยู่ DC ต้นทางเดียวกับใบต้นทาง" });
+    }
+
+    if (Number(sourceTruck.warehouse_id) !== warehouseId) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(403).json({ success: false, message: "คุณไม่มีสิทธิ์ย้ายสินค้าใน DC นี้" });
     }
 
     const placeholders = serialNos.map(() => "?").join(", ");

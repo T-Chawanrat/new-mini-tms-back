@@ -87,6 +87,7 @@ export const createReceive = async (req, res) => {
 
     await conn.beginTransaction();
     transactionStarted = true;
+    const now = new Date();
 
     const receiveCode = await generateReceiveCode(conn, finalCustomerId);
 
@@ -110,7 +111,7 @@ export const createReceive = async (req, res) => {
     const referenceNo = cleanCode(receiveHeader.reference_no);
 
     const receiveData = {
-      receive_date: new Date(),
+      receive_date: now,
       receive_code: receiveCode,
 
       customer_id: finalCustomerId,
@@ -154,7 +155,7 @@ export const createReceive = async (req, res) => {
       to_warehouse_id: toWarehouseId,
 
       status: "CREATE",
-      create_date: new Date(),
+      create_date: now,
 
       is_invoices: "N",
       app_create: "WEB",
@@ -169,7 +170,7 @@ export const createReceive = async (req, res) => {
 
       update_by_user_id: userId,
 
-      updated_at: new Date(),
+      updated_at: now,
     };
 
     /*
@@ -217,6 +218,7 @@ export const createReceive = async (req, res) => {
       const detailData = buildReceiveDetailData({
         receiveId,
         row,
+        now,
       });
 
       const insertDetail = buildInsertSql("tm_receive_details", detailData);
@@ -264,12 +266,13 @@ export const createReceive = async (req, res) => {
     | customer_type = BUSINESS
     |--------------------------------------------------------------------------
     */
-    await insertCreateReceiveSerials(conn, receiveId, "WEB");
+    await insertCreateReceiveSerials(conn, receiveId, "WEB", now);
 
     await insertCreateProductTransactions({
       conn,
       receiveId,
       createdBy: userId,
+      now,
     });
 
     await insertReceiveCreationLog({

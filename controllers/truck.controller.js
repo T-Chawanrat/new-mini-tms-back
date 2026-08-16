@@ -202,11 +202,11 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         data_yearmonth
       )
       SELECT
-        rs.receive_business_id,
-        rs.receive_walkin_id,
-        rs.receive_code,
-        product_truck.serial_id,
-        product_truck.serial_no,
+        transaction_last.receive_business_id,
+        transaction_last.receive_walkin_id,
+        transaction_last.receive_code,
+        transaction_last.serial_id,
+        transaction_last.serial_no,
         ?,
         ?,
         ?,
@@ -214,14 +214,14 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         'PUBLIC',
         truck.warehouse_id,
         actor.id,
-        NULL,
-        NULL,
+        transaction_last.latitude,
+        transaction_last.longitude,
         warehouse.warehouse_name,
-        rs.address,
-        rs.province_name,
-        rs.district_name,
-        rs.subdistrict_name,
-        rs.zip_code,
+        transaction_last.address,
+        transaction_last.province_name,
+        transaction_last.district_name,
+        transaction_last.subdistrict_name,
+        transaction_last.zip_code,
         TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         actor.username,
         COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
@@ -231,10 +231,13 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         truck.vehicle_id,
         truck.vehicle_contractor_id,
         COALESCE(plate_province.province_name, contractor_plate_province.province_name),
-        NULL,
+        transaction_last.note,
         ?,
         ?
-      FROM tm_product_trucks product_truck
+      FROM tm_product_transactions_last transaction_last
+      INNER JOIN tm_product_trucks product_truck
+        ON product_truck.serial_id = transaction_last.serial_id
+        AND product_truck.serial_no = transaction_last.serial_no
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
       INNER JOIN um_users actor
@@ -249,9 +252,6 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         ON plate_province.id = vehicle.license_plate_province_id
       LEFT JOIN mm_province contractor_plate_province
         ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
-      LEFT JOIN tm_receive_serials rs
-        ON rs.serial_id = product_truck.serial_id
-        AND rs.serial_no = product_truck.serial_no
       WHERE product_truck.truck_load_id = ?
     `,
     [statusMessage, statusId, now, dataYear, dataYearmonth, actorId, truckLoadId],
@@ -303,6 +303,15 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
 
 export const getTruckLoads = async (req, res) => {
   try {
+    const warehouseId = Number(req.user?.warehouse_id);
+
+    if (!Number.isInteger(warehouseId) || warehouseId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "ไม่พบ Warehouse ที่เลือก",
+      });
+    }
+
     const {
       truck_code,
       create_date_from,
@@ -314,8 +323,8 @@ export const getTruckLoads = async (req, res) => {
     } = req.query;
 
     const { page, limit, offset } = getPagination(req.query.page, req.query.limit);
-    const conditions = ["COALESCE(t.is_deleted, 'N') = 'N'"];
-    const params = [];
+    const conditions = ["COALESCE(t.is_deleted, 'N') = 'N'", "COALESCE(t.is_arrived, 'N') <> 'Y'", "t.warehouse_id = ?"];
+    const params = [warehouseId];
     const search = cleanCode(truck_code);
 
     if (search) {

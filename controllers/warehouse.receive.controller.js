@@ -166,6 +166,7 @@ export const createWarehouseReceive = async (req, res) => {
       null,
       resendDate,
       createdBy,
+      now,
     ]);
 
     const [result] = await connection.query(
@@ -178,7 +179,8 @@ export const createWarehouseReceive = async (req, res) => {
           palette_id,
           route_id,
           resend_date,
-          created_by
+          created_by,
+          created_date
         )
         VALUES ?
       `,
@@ -212,113 +214,48 @@ export const createWarehouseReceive = async (req, res) => {
       [createdBy, now, ...serialNos],
     );
 
-    /*
-     * บันทึกประวัติ Transaction
-     * warehouse_id ตรงนี้ไม่ต้องเปลี่ยน เพราะเป็นคอลัมน์ของ
-     * tm_product_transactions ไม่ใช่ tm_product_warehouses
-     */
     await connection.query(
       `
         INSERT INTO tm_product_transactions (
-          receive_business_id,
-          receive_walkin_id,
-          receive_code,
-          serial_id,
-          serial_no,
-          status_message,
-          status_id,
-          datetime,
-          update_date,
-          type,
-          warehouse_id,
-          created_by,
-          latitude,
-          longitude,
-          warehouse_name,
-          address,
-          province_name,
-          district_name,
-          subdistrict_name,
-          zip_code,
-          created_name,
-          username,
-          truck_license_plate,
-          user_id,
-          truck_name,
-          truck_id,
-          truck_province,
-          note,
-          data_year,
-          data_yearmonth
+          receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no,
+          status_message, status_id, datetime, update_date, type,
+          warehouse_id, created_by, latitude, longitude, warehouse_name,
+          address, province_name, district_name, subdistrict_name, zip_code,
+          created_name, username, truck_license_plate, user_id, user_truck_id,
+          truck_name, truck_id, vehicle_contractor_id, truck_province, note,
+          data_year, data_yearmonth
         )
         SELECT
-          rs.receive_business_id,
-          rs.receive_walkin_id,
-          rs.receive_code,
-          rs.serial_id,
-          rs.serial_no,
-          'พัสดุถึงศูนย์',
-          4,
-          ?,
-          NULL,
-          'PUBLIC',
-          ?,
-          ?,
-          NULL,
-          NULL,
-          warehouse.warehouse_name,
-          rs.address,
-          rs.province_name,
-          rs.district_name,
-          rs.subdistrict_name,
-          rs.zip_code,
-          TRIM(
-            CONCAT_WS(
-              ' ',
-              NULLIF(actor.first_name, ''),
-              NULLIF(actor.last_name, '')
-            )
-          ),
-          actor.username,
-          NULL,
-          actor.id,
-          NULL,
-          NULL,
-          NULL,
-          NULL,
-          ?,
-          ?
-        FROM tm_receive_serials rs
-
+          transaction_last.receive_business_id,
+          transaction_last.receive_walkin_id,
+          transaction_last.receive_code,
+          transaction_last.serial_id,
+          transaction_last.serial_no,
+          'พัสดุถึงศูนย์', 4, ?, NULL, 'PUBLIC',
+          ?, actor.id, transaction_last.latitude, transaction_last.longitude, warehouse.warehouse_name,
+          transaction_last.address, transaction_last.province_name, transaction_last.district_name,
+          transaction_last.subdistrict_name, transaction_last.zip_code,
+          TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+          actor.username, transaction_last.truck_license_plate, actor.id, transaction_last.user_truck_id,
+          transaction_last.truck_name, transaction_last.truck_id, transaction_last.vehicle_contractor_id,
+          transaction_last.truck_province, transaction_last.note, ?, ?
+        FROM tm_product_transactions_last transaction_last
         INNER JOIN um_users actor
           ON actor.id = ?
-
         LEFT JOIN mm_warehouses_to warehouse
           ON warehouse.warehouse_id = ?
-
-        WHERE rs.serial_no IN (${placeholders})
+        WHERE transaction_last.serial_no IN (${placeholders})
       `,
       [now, warehouseId, createdBy, dataYear, dataYearmonth, createdBy, warehouseId, ...serialNos],
     );
 
-    /*
-     * อัปเดต Transaction ล่าสุด
-     * warehouse_id ตรงนี้ก็ยังเป็นของ tm_product_transactions_last
-     */
     await connection.query(
       `
         UPDATE tm_product_transactions_last transaction_last
-
-        INNER JOIN tm_receive_serials rs
-          ON rs.serial_id = transaction_last.serial_id
-          AND rs.serial_no = transaction_last.serial_no
-
         INNER JOIN um_users actor
           ON actor.id = ?
-
         LEFT JOIN mm_warehouses_to warehouse
           ON warehouse.warehouse_id = ?
-
         SET
           transaction_last.status_message = 'พัสดุถึงศูนย์',
           transaction_last.status_id = 4,
@@ -328,11 +265,6 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.warehouse_id = ?,
           transaction_last.created_by = ?,
           transaction_last.warehouse_name = warehouse.warehouse_name,
-          transaction_last.address = rs.address,
-          transaction_last.province_name = rs.province_name,
-          transaction_last.district_name = rs.district_name,
-          transaction_last.subdistrict_name = rs.subdistrict_name,
-          transaction_last.zip_code = rs.zip_code,
           transaction_last.created_name = TRIM(
             CONCAT_WS(
               ' ',
@@ -343,7 +275,7 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.username = actor.username,
           transaction_last.user_id = actor.id
 
-        WHERE rs.serial_no IN (${placeholders})
+        WHERE transaction_last.serial_no IN (${placeholders})
       `,
       [createdBy, warehouseId, now, now, warehouseId, createdBy, ...serialNos],
     );

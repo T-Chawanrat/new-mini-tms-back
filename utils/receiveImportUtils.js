@@ -1043,6 +1043,7 @@ export const insertImportProductTransactions = async ({
   conn,
   receiveId,
   createdBy,
+  now,
 }) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
   const cleanCreatedBy = toNumberOrNull(createdBy);
@@ -1099,7 +1100,8 @@ export const insertImportProductTransactions = async ({
           truck_id,
           truck_province,
 
-          note
+          note,
+          created_date
           ${includeDataPeriod ? `,
 
           data_year,
@@ -1116,7 +1118,7 @@ export const insertImportProductTransactions = async ({
           'รับเข้าระบบ' AS status_message,
           1 AS status_id,
 
-          NOW() AS datetime,
+          ? AS datetime,
           NULL AS update_date,
           'PUBLIC' AS type,
 
@@ -1148,7 +1150,8 @@ export const insertImportProductTransactions = async ({
           NULL AS truck_id,
           NULL AS truck_province,
 
-          NULL AS note
+          NULL AS note,
+          ? AS created_date
           ${includeDataPeriod ? `,
 
           YEAR(NOW()) AS data_year,
@@ -1172,6 +1175,8 @@ export const insertImportProductTransactions = async ({
           AND COALESCE(i.is_deleted, 'N') = 'N'
       `,
       [
+        now,
+        now,
         cleanCreatedBy,
         cleanReceiveId,
       ],

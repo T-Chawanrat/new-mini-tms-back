@@ -86,6 +86,7 @@ export const createDcReceive = async (req, res) => {
       `
         SELECT
           product_truck.id AS product_truck_id,
+          product_truck.truck_load_id,
           product_truck.serial_id,
           product_truck.serial_no,
           truck.to_warehouse_id
@@ -218,6 +219,68 @@ export const createDcReceive = async (req, res) => {
       [actorId, now, ...serialNos],
     );
 
+    const dataYear = now.getFullYear();
+    const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
+
+    await connection.query(
+      `
+        INSERT INTO tm_product_transactions (
+          receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no,
+          status_message, status_id, datetime, update_date, type,
+          warehouse_id, created_by, latitude, longitude, warehouse_name,
+          address, province_name, district_name, subdistrict_name, zip_code,
+          created_name, username, truck_license_plate, user_id, user_truck_id,
+          truck_name, truck_id, vehicle_contractor_id, truck_province, note,
+          data_year, data_yearmonth
+        )
+        SELECT
+          transaction_last.receive_business_id,
+          transaction_last.receive_walkin_id,
+          transaction_last.receive_code,
+          transaction_last.serial_id,
+          transaction_last.serial_no,
+          'พัสดุถึงศูนย์ปลายทาง', 13, ?, NULL, 'PUBLIC',
+          ?, actor.id, transaction_last.latitude, transaction_last.longitude, warehouse.warehouse_name,
+          transaction_last.address, transaction_last.province_name, transaction_last.district_name,
+          transaction_last.subdistrict_name, transaction_last.zip_code,
+          TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+          actor.username, transaction_last.truck_license_plate, actor.id, transaction_last.user_truck_id,
+          transaction_last.truck_name, transaction_last.truck_id, transaction_last.vehicle_contractor_id,
+          transaction_last.truck_province, transaction_last.note, ?, ?
+        FROM tm_product_transactions_last transaction_last
+        INNER JOIN um_users actor
+          ON actor.id = ?
+        LEFT JOIN mm_warehouses_to warehouse
+          ON warehouse.warehouse_id = ?
+        WHERE transaction_last.serial_no IN (${placeholders})
+      `,
+      [now, warehouseId, dataYear, dataYearmonth, actorId, warehouseId, ...serialNos],
+    );
+
+    await connection.query(
+      `
+        UPDATE tm_product_transactions_last transaction_last
+        INNER JOIN um_users actor
+          ON actor.id = ?
+        LEFT JOIN mm_warehouses_to warehouse
+          ON warehouse.warehouse_id = ?
+        SET
+          transaction_last.status_message = 'พัสดุถึงศูนย์ปลายทาง',
+          transaction_last.status_id = 13,
+          transaction_last.datetime = ?,
+          transaction_last.update_date = ?,
+          transaction_last.type = 'PUBLIC',
+          transaction_last.warehouse_id = ?,
+          transaction_last.created_by = actor.id,
+          transaction_last.warehouse_name = warehouse.warehouse_name,
+          transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+          transaction_last.username = actor.username,
+          transaction_last.user_id = actor.id
+        WHERE transaction_last.serial_no IN (${placeholders})
+      `,
+      [actorId, warehouseId, now, now, warehouseId, ...serialNos],
+    );
+
     await connection.query(
       `
         DELETE product_truck
@@ -230,6 +293,32 @@ export const createDcReceive = async (req, res) => {
       `,
       [...serialNos, warehouseId],
     );
+
+    const truckLoadIds = [...new Set(productRows.map((row) => Number(row.truck_load_id)).filter(Number.isInteger))];
+
+    if (truckLoadIds.length) {
+      const truckPlaceholders = truckLoadIds.map(() => "?").join(", ");
+
+      await connection.query(
+        `
+          UPDATE tm_trucks truck
+          SET
+            truck.is_arrived = 'Y',
+            truck.arrived_by = ?,
+            truck.arrived_datetime = ?
+          WHERE truck.id IN (${truckPlaceholders})
+            AND truck.to_warehouse_id = ?
+            AND COALESCE(truck.is_arrived, 'N') <> 'Y'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM tm_product_trucks remaining_product
+              WHERE remaining_product.truck_load_id = truck.id
+                AND remaining_product.status IN ('LOADED', 'DELIVERING')
+            )
+        `,
+        [actorId, now, ...truckLoadIds, warehouseId],
+      );
+    }
 
     await connection.commit();
     transactionStarted = false;

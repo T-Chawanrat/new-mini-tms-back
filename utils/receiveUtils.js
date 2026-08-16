@@ -164,7 +164,7 @@ export const makeAutoSerial = (receiveCode, running) => {
  *
  * tm_receive_details = รายละเอียดสินค้า/กล่อง/ขนาดในบิล
  */
-export const buildReceiveDetailData = ({ receiveId, row }) => {
+export const buildReceiveDetailData = ({ receiveId, row, now }) => {
   const qty = getSafeQty(row.qty);
 
   return {
@@ -204,7 +204,7 @@ export const buildReceiveDetailData = ({ receiveId, row }) => {
     // frontend ยังไม่ได้ส่ง vol
     vol: null,
 
-    updated_at: new Date(),
+    updated_at: now,
   };
 };
 
@@ -320,6 +320,7 @@ export const insertCreateReceiveSerials = async (
   conn,
   receiveId,
   sourceType = "WEB",
+  now,
 ) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
 
@@ -461,7 +462,7 @@ export const insertCreateReceiveSerials = async (
         d.vol,
         d.size_type,
 
-        NOW() AS last_modified,
+        ? AS last_modified,
         ? AS source_type,
         'BUSINESS' AS customer_type
       FROM tm_receives r
@@ -481,7 +482,7 @@ export const insertCreateReceiveSerials = async (
         ON s.shipper_id = r.shipper_id
       WHERE r.receive_id = ?
     `,
-    [sourceType, cleanReceiveId],
+    [now, sourceType, cleanReceiveId],
   );
 
   await conn.query(
@@ -513,9 +514,12 @@ export const insertCreateProductTransactions = async ({
   conn,
   receiveId,
   createdBy,
+  now,
 }) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
   const cleanCreatedBy = toNumberOrNull(createdBy);
+  const dataYear = now.getFullYear();
+  const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
 
   if (!cleanReceiveId) {
     throw createReceiveError(
@@ -569,7 +573,8 @@ export const insertCreateProductTransactions = async ({
           truck_id,
           truck_province,
 
-          note
+          note,
+          created_date
           ${includeDataPeriod ? `,
 
           data_year,
@@ -586,7 +591,7 @@ export const insertCreateProductTransactions = async ({
           'รับเข้าระบบ' AS status_message,
           1 AS status_id,
 
-          NOW() AS datetime,
+          ? AS datetime,
           NULL AS update_date,
           'PUBLIC' AS type,
 
@@ -618,13 +623,12 @@ export const insertCreateProductTransactions = async ({
           NULL AS truck_id,
           NULL AS truck_province,
 
-          NULL AS note
+          NULL AS note,
+          ? AS created_date
           ${includeDataPeriod ? `,
 
-          YEAR(NOW()) AS data_year,
-          CAST(
-            DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED
-          ) AS data_yearmonth` : ""}
+          ? AS data_year,
+          ? AS data_yearmonth` : ""}
         FROM tm_receives r
         INNER JOIN tm_receive_details d
           ON d.receive_id = r.receive_id
@@ -642,6 +646,9 @@ export const insertCreateProductTransactions = async ({
           AND COALESCE(i.is_deleted, 'N') = 'N'
       `,
       [
+        now,
+        now,
+        ...(includeDataPeriod ? [dataYear, dataYearmonth] : []),
         cleanCreatedBy,
         cleanReceiveId,
       ],

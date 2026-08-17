@@ -241,7 +241,7 @@ export const createReceive = async (req, res) => {
       autoSerialRunning = builtItems.nextRunning;
 
       for (const item of detailItems) {
-        const productSerial = await createActiveSerialOrThrow(conn, item.serial_no);
+        const productSerial = await createActiveSerialOrThrow(conn, item.serial_no, now);
 
         const finalItem = {
           ...item,
@@ -284,6 +284,7 @@ export const createReceive = async (req, res) => {
       detailCount: receiveDetailCount,
       itemCount: receiveItemCount,
       createdBy: userId,
+      now,
     });
 
     /*

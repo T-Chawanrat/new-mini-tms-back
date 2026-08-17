@@ -792,7 +792,7 @@ export const buildImportDetailItemData = ({ receiveDetailId, productSerial }) =>
   };
 };
 
-export const createActiveSerialOrThrow = async (conn, serialNo) => {
+export const createActiveSerialOrThrow = async (conn, serialNo, now) => {
   const cleanSerialNo = cleanCode(serialNo);
 
   if (!cleanSerialNo) {
@@ -820,10 +820,10 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
     await conn.query(
       `
         INSERT INTO tm_product_actived
-        (serial_id, serial_no)
-        VALUES (?, ?)
+        (serial_id, serial_no, created_date)
+        VALUES (?, ?, ?)
       `,
-      [serialId, cleanSerialNo],
+      [serialId, cleanSerialNo, now],
     );
 
     return {
@@ -856,7 +856,7 @@ export const insertImportReceiveReference = async ({ conn, referenceNo, receiveI
   await conn.query(sql, values);
 };
 
-export const insertImportReceiveSerials = async (conn, receiveId) => {
+export const insertImportReceiveSerials = async (conn, receiveId, now) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
 
   if (!cleanReceiveId) {
@@ -995,7 +995,7 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         NULL AS vol,
         d.size_type,
 
-         NOW() AS last_modified,
+         ? AS last_modified,
          'IMPORT' AS source_type,
         'BUSINESS' AS customer_type
       FROM tm_receive_import_head h
@@ -1011,7 +1011,7 @@ export const insertImportReceiveSerials = async (conn, receiveId) => {
         ON s.shipper_id = h.shipper_id
       WHERE h.receive_id = ?
     `,
-    [cleanReceiveId],
+    [now, cleanReceiveId],
   );
 
   await conn.query(

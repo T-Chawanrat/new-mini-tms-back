@@ -269,7 +269,7 @@ export const buildReceiveDetailItems = ({ receiveCode, receiveDetailId, row, sta
   };
 };
 
-export const createActiveSerialOrThrow = async (conn, serialNo) => {
+export const createActiveSerialOrThrow = async (conn, serialNo, now) => {
   const cleanSerialNo = cleanCode(serialNo);
 
   if (!cleanSerialNo) {
@@ -297,10 +297,10 @@ export const createActiveSerialOrThrow = async (conn, serialNo) => {
     await conn.query(
       `
         INSERT INTO tm_product_actived
-        (serial_id, serial_no)
-        VALUES (?, ?)
+        (serial_id, serial_no, created_date)
+        VALUES (?, ?, ?)
       `,
-      [serialId, cleanSerialNo],
+      [serialId, cleanSerialNo, now],
     );
 
     return {

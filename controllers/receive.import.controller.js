@@ -178,7 +178,7 @@ export const importReceivesFromExcel = async (req, res) => {
 
         const receiveDetailId = detailResult.insertId;
 
-        const productSerial = row.serial_no ? await createActiveSerialOrThrow(conn, row.serial_no) : null;
+        const productSerial = row.serial_no ? await createActiveSerialOrThrow(conn, row.serial_no, now) : null;
 
         const itemData = buildImportDetailItemData({
           receiveDetailId,
@@ -192,7 +192,7 @@ export const importReceivesFromExcel = async (req, res) => {
         }
       }
 
-      await insertImportReceiveSerials(conn, receiveId);
+      await insertImportReceiveSerials(conn, receiveId, now);
 
       await insertImportProductTransactions({
         conn,
@@ -211,6 +211,7 @@ export const importReceivesFromExcel = async (req, res) => {
         detailCount: billRows.length,
         itemCount: billRows.filter((row) => row.serial_no).length,
         createdBy: userId,
+        now,
       });
 
       queueProcessed += 1;

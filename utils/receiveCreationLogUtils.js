@@ -12,6 +12,7 @@ export const insertReceiveCreationLog = async ({
   detailCount = 0,
   itemCount = 0,
   createdBy,
+  now,
 }) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
   const cleanCreatedBy = toNumberOrNull(createdBy);
@@ -59,7 +60,7 @@ export const insertReceiveCreationLog = async ({
     created_username: cleanDbText(user.username),
     created_name: createdName,
     warehouse_id: toNumberOrNull(user.warehouse_id),
-    created_at: new Date(),
+    created_at: now,
   };
 
   const { sql, values } = buildInsertSql("logs_receive_create", data);

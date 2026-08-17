@@ -24,6 +24,7 @@ import truckLoadRoutes from "./routes/truck.route.js";
 import dcReceiveRoutes from "./routes/dc.receive.routes.js";
 import moveTkRoutes from "./routes/move.tk.routes.js";
 import contractorRoutes from "./routes/contractor.routes.js";
+import driverAuthRoute from "./routes/auth.driver.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +62,8 @@ app.use("/truck-loads", truckLoadRoutes);
 app.use("/dc-receives", dcReceiveRoutes);
 app.use("/move-tk", moveTkRoutes);
 app.use("/contractors", contractorRoutes);
+app.use("/driver", driverAuthRoute);
+
 
 app.get("/test", (req, res) => {
   res.send("Backend is working!");

@@ -1,11 +1,7 @@
 import db from "../config/db.js";
 
 import { buildLike } from "../utils/cleanText.js";
-
-const isValidPhoneNumber = (value) => {
-  const phone = String(value ?? "").trim();
-  return phone === "" || /^0\d+$/.test(phone);
-};
+import { isValidThaiPhone } from "../utils/validationUtils.js";
 
 /* ================= CUSTOMER ================= */
 
@@ -53,7 +49,7 @@ export const createCustomer = async (req, res) => {
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
 
-    if (!isValidPhoneNumber(tel) || !isValidPhoneNumber(contact_tel)) {
+    if (!isValidThaiPhone(tel) || !isValidThaiPhone(contact_tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 
@@ -124,7 +120,7 @@ export const updateCustomer = async (req, res) => {
     const { code, name, tax_id, address, subdistrict_id, district_id, province_id, zip_code, tel, line, contact_name, contact_tel, email, type } =
       req.body;
 
-    if (!isValidPhoneNumber(tel) || !isValidPhoneNumber(contact_tel)) {
+    if (!isValidThaiPhone(tel) || !isValidThaiPhone(contact_tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 
@@ -272,7 +268,6 @@ export const createCustomerUser = async (req, res) => {
 
     if (exists.length > 0) {
       await connection.rollback();
-      connection.release();
 
       return res.status(400).json({
         message: "username นี้มีในระบบแล้ว",
@@ -301,7 +296,6 @@ export const createCustomerUser = async (req, res) => {
     );
 
     await connection.commit();
-    connection.release();
 
     res.json({
       message: "create customer user success",
@@ -309,8 +303,9 @@ export const createCustomerUser = async (req, res) => {
     });
   } catch (err) {
     if (connection) await connection.rollback();
-    if (connection) connection.release();
 
     res.status(500).json({ message: err.message });
+  } finally {
+    connection?.release();
   }
 };

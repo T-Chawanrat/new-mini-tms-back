@@ -8,7 +8,8 @@ import {
   cleanDbText,
   toNumberOrNull,
 } from "../utils/cleanText.js";
-import { cleanYN, getPagination } from "../utils/truckUtils.js";
+import { getPagination } from "../utils/pagination.js";
+import { cleanYN, syncTruckBoxCount } from "../utils/truckUtils.js";
 
 const createTruckCode = async (connection, now) => {
   const dateParts = new Intl.DateTimeFormat("en-CA", {
@@ -133,33 +134,6 @@ const getTruckLoadRow = async (connection, truckLoadId) => {
   );
 
   return rows[0] || null;
-};
-
-const syncTruckBoxCount = async (connection, truckLoadId) => {
-  const [countRows] = await connection.query(
-    `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,
-    [truckLoadId],
-  );
-  const countBox = Number(countRows[0]?.count_box || 0);
-
-  const [existingRows] = await connection.query(
-    `SELECT id FROM tm_truck_count WHERE truck_load_id = ? LIMIT 1`,
-    [truckLoadId],
-  );
-
-  if (existingRows.length) {
-    await connection.query(
-      `UPDATE tm_truck_count SET count_box = ? WHERE id = ?`,
-      [countBox, existingRows[0].id],
-    );
-  } else {
-    await connection.query(
-      `INSERT INTO tm_truck_count (truck_load_id, count_box) VALUES (?, ?)`,
-      [truckLoadId, countBox],
-    );
-  }
-
-  return countBox;
 };
 
 const writeTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage, now }) => {
@@ -525,6 +499,7 @@ export const getTruckLoadProducts = async (req, res) => {
       WHERE NULLIF(TRIM(pw.serial_no), '') IS NOT NULL
         AND pw.now_warehouse_id = ?
         AND pw.to_warehouse_id = ?
+        AND pw.now_warehouse_id <> pw.to_warehouse_id
         AND active_truck.id IS NULL
       ORDER BY pw.id ASC
     `,
@@ -659,6 +634,15 @@ export const loadTruckProduct = async (req, res) => {
       await connection.rollback();
       transactionStarted = false;
       return res.status(404).json({ success: false, message: "ไม่พบ Serial No ในคลังต้นทาง" });
+    }
+
+    if (Number(product.now_warehouse_id) === Number(product.to_warehouse_id)) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({
+        success: false,
+        message: "พัสดุอยู่ที่ DC ปลายทางแล้ว ไม่สามารถยิงขึ้นรถได้",
+      });
     }
 
     const destinationMatches = Number(product.to_warehouse_id) === Number(truckLoad.to_warehouse_id);

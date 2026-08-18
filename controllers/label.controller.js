@@ -1,18 +1,7 @@
 import db from "../config/db.js";
 
 import { buildLike, cleanDbText, toNumberOrNull } from "../utils/cleanText.js";
-
-const getPagination = (page, limit) => {
-  const pageNum = Math.max(Number(page) || 1, 1);
-  const limitNum = Math.min(Math.max(Number(limit) || 50, 1), 500);
-  const offset = (pageNum - 1) * limitNum;
-
-  return {
-    pageNum,
-    limitNum,
-    offset,
-  };
-};
+import { getPagination } from "../utils/pagination.js";
 
 const activeSerialCondition = `
   (
@@ -186,7 +175,10 @@ export const getLabelReceives = async (req, res) => {
   try {
     const { page = "1", limit = "50" } = req.query;
 
-    const { pageNum, limitNum, offset } = getPagination(page, limit);
+    const { page: pageNum, limit: limitNum, offset } = getPagination(page, limit, {
+      defaultLimit: 50,
+      maxLimit: 500,
+    });
     const { whereSql, params } = buildReceiveWhere(req.query);
 
     const toWarehouseNameSql = getToWarehouseNameSelectSql();
@@ -305,7 +297,10 @@ export const getLabelSerials = async (req, res) => {
   try {
     const { page = "1", limit = "500" } = req.query;
 
-    const { pageNum, limitNum, offset } = getPagination(page, limit);
+    const { page: pageNum, limit: limitNum, offset } = getPagination(page, limit, {
+      defaultLimit: 50,
+      maxLimit: 500,
+    });
     const { whereSql, params } = buildSerialWhere(req.query);
 
     const toWarehouseNameSql = getToWarehouseNameSelectSql();

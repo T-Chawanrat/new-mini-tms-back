@@ -4,11 +4,7 @@ import path from "path";
 import { buildLike } from "../utils/cleanText.js";
 import { getShipperROImageUrl } from "../utils/fileUrl.js";
 import { cleanFileNamePart } from "../utils/cleanText.js";
-
-const isValidPhoneNumber = (value) => {
-  const phone = String(value ?? "").trim();
-  return phone === "" || /^0\d+$/.test(phone);
-};
+import { isValidThaiPhone } from "../utils/validationUtils.js";
 
 /* ================= SHIPPERS ================= */
 
@@ -113,7 +109,7 @@ export const createShipper = async (req, res) => {
 
     const { shipper_code, shipper_type_id, shipper_name, address, subdistrict_id, district_id, province_id, zip_code, tel, fax } = req.body;
 
-    if (!isValidPhoneNumber(tel)) {
+    if (!isValidThaiPhone(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 
@@ -229,7 +225,7 @@ export const updateShipper = async (req, res) => {
       priority,
     } = req.body;
 
-    if (!isValidPhoneNumber(tel)) {
+    if (!isValidThaiPhone(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 

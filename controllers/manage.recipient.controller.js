@@ -1,8 +1,7 @@
 import db from "../config/db.js";
 import { buildLike } from "../utils/cleanText.js";
 import { getPaginationParams } from "../utils/pagination.js";
-
-const isValidPhoneNumber = (value) => /^0\d+$/.test(String(value ?? "").trim());
+import { isValidThaiPhone } from "../utils/validationUtils.js";
 
 /* ================= RECIPIENTS ================= */
 
@@ -313,7 +312,7 @@ export const createRecipientDetail = async (req, res) => {
       });
     }
 
-    if (!isValidPhoneNumber(tel1)) {
+    if (!isValidThaiPhone(tel1, { required: true })) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 
@@ -509,7 +508,7 @@ export const updateRecipient = async (req, res) => {
         });
       }
 
-      if (!isValidPhoneNumber(tel1)) {
+      if (!isValidThaiPhone(tel1, { required: true })) {
         return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
       }
 

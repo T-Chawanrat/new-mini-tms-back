@@ -1,17 +1,7 @@
 import db from "../config/db.js";
 import { formatDateOnly } from "../utils/formatDate.js";
 import { buildLike } from "../utils/cleanText.js";
-
-const isValidPhoneNumber = (value) => {
-  const phone = String(value ?? "").trim();
-  return phone === "" || /^0\d+$/.test(phone);
-};
-
-const genderFromTitle = (titleName) => {
-  if (titleName === "นาย") return "ชาย";
-  if (titleName === "นาง" || titleName === "นางสาว") return "หญิง";
-  return null;
-};
+import { genderFromTitle, isValidThaiPhone } from "../utils/validationUtils.js";
 
 // GET ALL USERS
 export const getUsers = async (req, res) => {
@@ -142,7 +132,7 @@ export const createUser = async (req, res) => {
     const role = Number(role_id);
     const resolvedGender = genderFromTitle(title_name);
 
-    if (!isValidPhoneNumber(tel)) {
+    if (!isValidThaiPhone(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 
@@ -174,7 +164,6 @@ export const createUser = async (req, res) => {
 
     if (existsUsername.length > 0) {
       await connection.rollback();
-      connection.release();
 
       return res.status(400).json({
         message: "username นี้มีในระบบแล้ว",
@@ -194,7 +183,6 @@ export const createUser = async (req, res) => {
 
       if (existsEmployeeCode.length > 0) {
         await connection.rollback();
-        connection.release();
 
         return res.status(400).json({
           message: "รหัสพนักงานนี้มีในระบบแล้ว",
@@ -206,7 +194,6 @@ export const createUser = async (req, res) => {
 
     if (role === 7 && (!license_no || !formattedLicenseExpire)) {
       await connection.rollback();
-      connection.release();
 
       return res.status(400).json({
         message: "driver ต้องมี license_no และ license_expire",
@@ -215,7 +202,6 @@ export const createUser = async (req, res) => {
 
     if (role === 3 && zones.length === 0) {
       await connection.rollback();
-      connection.release();
 
       return res.status(400).json({
         message: "manager ต้องเลือก zone อย่างน้อย 1",
@@ -292,7 +278,6 @@ export const createUser = async (req, res) => {
     }
 
     await connection.commit();
-    connection.release();
 
     res.json({
       message: "create success",
@@ -301,10 +286,11 @@ export const createUser = async (req, res) => {
     });
   } catch (err) {
     if (connection) await connection.rollback();
-    if (connection) connection.release();
 
     console.error("CREATE USER ERROR:", err);
     res.status(500).json({ message: err.message });
+  } finally {
+    connection?.release();
   }
 };
 
@@ -321,7 +307,7 @@ export const updateUser = async (req, res) => {
     const { employee_code, title_name, first_name, last_name, citizen_id, email, tel, license_no, license_expire, is_active } = req.body;
     const resolvedGender = genderFromTitle(title_name);
 
-    if (!isValidPhoneNumber(tel)) {
+    if (!isValidThaiPhone(tel)) {
       return res.status(400).json({ message: "เบอร์โทรต้องขึ้นต้นด้วย 0" });
     }
 

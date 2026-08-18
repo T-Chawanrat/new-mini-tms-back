@@ -314,7 +314,6 @@ export const importSTD = async (req, res) => {
     );
 
     await connection.commit();
-    connection.release();
 
     return res.json({
       success: totalInserted > 0,
@@ -329,12 +328,13 @@ export const importSTD = async (req, res) => {
   } catch (err) {
     if (connection) {
       await connection.rollback();
-      connection.release();
     }
 
     return res.status(500).json({
       message: err.message,
     });
+  } finally {
+    connection?.release();
   }
 };
 
@@ -752,7 +752,6 @@ export const manual = async (req, res) => {
     );
 
     await connection.commit();
-    connection.release();
 
     return res.json({
       success: true,
@@ -767,11 +766,12 @@ export const manual = async (req, res) => {
   } catch (err) {
     if (connection) {
       await connection.rollback();
-      connection.release();
     }
 
     return res.status(500).json({
       message: err.message,
     });
+  } finally {
+    connection?.release();
   }
 };

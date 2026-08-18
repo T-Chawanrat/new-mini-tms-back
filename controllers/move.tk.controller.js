@@ -1,5 +1,6 @@
 import db from "../config/db.js";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
+import { syncTruckBoxCount } from "../utils/truckUtils.js";
 
 const TRUCK_LIST_SELECT = `
   truck.id AS truck_load_id,
@@ -38,32 +39,6 @@ const TRUCK_LIST_JOINS = `
   LEFT JOIN mm_province contractor_province
     ON contractor_province.id = contractor_vehicle.license_plate_province_id
 `;
-
-const syncTruckCount = async (connection, truckLoadId) => {
-  const [countRows] = await connection.query(
-    `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,
-    [truckLoadId],
-  );
-  const countBox = Number(countRows[0]?.count_box || 0);
-
-  const [existingRows] = await connection.query(
-    `SELECT id FROM tm_truck_count WHERE truck_load_id = ? LIMIT 1`,
-    [truckLoadId],
-  );
-
-  if (existingRows.length) {
-    await connection.query(
-      `UPDATE tm_truck_count SET count_box = ? WHERE id = ?`,
-      [countBox, existingRows[0].id],
-    );
-    return;
-  }
-
-  await connection.query(
-    `INSERT INTO tm_truck_count (truck_load_id, count_box) VALUES (?, ?)`,
-    [truckLoadId, countBox],
-  );
-};
 
 export const getMoveTkSourceTrucks = async (req, res) => {
   try {
@@ -408,8 +383,8 @@ export const moveTkProducts = async (req, res) => {
       [actorId, now, targetTruckLoadId, ...serialNos],
     );
 
-    await syncTruckCount(connection, sourceTruckLoadId);
-    await syncTruckCount(connection, targetTruckLoadId);
+    await syncTruckBoxCount(connection, sourceTruckLoadId);
+    await syncTruckBoxCount(connection, targetTruckLoadId);
 
     const [sourceCountRows] = await connection.query(
       `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,

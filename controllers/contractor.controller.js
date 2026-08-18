@@ -1,4 +1,5 @@
 import db from "../config/db.js";
+import { genderFromTitle } from "../utils/validationUtils.js";
 
 const truckPlateTypeIds = new Set(["3", "4"]);
 
@@ -7,13 +8,6 @@ const CONTRACTOR_ROLE_ID = 7;
 const textOrNull = (value) => {
   const text = String(value ?? "").trim();
   return text || null;
-};
-
-const genderFromTitle = (titleName) => {
-  const title = textOrNull(titleName);
-  if (title === "นาย") return "ชาย";
-  if (title === "นาง" || title === "นางสาว") return "หญิง";
-  return null;
 };
 
 const positiveIdOrNull = (value) => {

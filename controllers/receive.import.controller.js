@@ -142,6 +142,7 @@ export const importReceivesFromExcel = async (req, res) => {
         shipperAddress,
         importDate,
         importId,
+        now,
       });
 
       const { sql, values } = buildInsertSql("tm_receive_import_head", data);

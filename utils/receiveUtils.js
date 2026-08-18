@@ -1,8 +1,8 @@
 // server/utils/receiveUtils.js
 
-import { randomUUID } from "crypto";
-
 import { cleanCode, cleanDbText, formatDateYYYYMMDD, padNumber, toNumberOrNull, toNumberOrZero } from "./cleanText.js";
+import { createActiveProductSerialOrThrow } from "./productActiveUtils.js";
+import { insertInitialProductTransactions } from "./productTransactionUtils.js";
 
 const createReceiveError = (message, details = {}) => {
   const error = new Error(message);
@@ -270,50 +270,12 @@ export const buildReceiveDetailItems = ({ receiveCode, receiveDetailId, row, sta
 };
 
 export const createActiveSerialOrThrow = async (conn, serialNo, now) => {
-  const cleanSerialNo = cleanCode(serialNo);
-
-  if (!cleanSerialNo) {
-    throw createReceiveError("serial_no required");
-  }
-
-  const [existingRows] = await conn.query(
-    `
-      SELECT serial_id, serial_no
-      FROM tm_product_actived
-      WHERE serial_no = ?
-      LIMIT 1
-      FOR UPDATE
-    `,
-    [cleanSerialNo],
-  );
-
-  if (existingRows.length > 0) {
-    throw createReceiveError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
-  }
-
-  const serialId = randomUUID();
-
-  try {
-    await conn.query(
-      `
-        INSERT INTO tm_product_actived
-        (serial_id, serial_no, created_date)
-        VALUES (?, ?, ?)
-      `,
-      [serialId, cleanSerialNo, now],
-    );
-
-    return {
-      serial_id: serialId,
-      serial_no: cleanSerialNo,
-    };
-  } catch (error) {
-    if (error?.code === "ER_DUP_ENTRY") {
-      throw createReceiveError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
-    }
-
-    throw error;
-  }
+  return createActiveProductSerialOrThrow({
+    conn,
+    serialNo,
+    now,
+    createError: createReceiveError,
+  });
 };
 
 export const insertCreateReceiveSerials = async (
@@ -515,146 +477,11 @@ export const insertCreateProductTransactions = async ({
   receiveId,
   createdBy,
   now,
-}) => {
-  const cleanReceiveId = toNumberOrNull(receiveId);
-  const cleanCreatedBy = toNumberOrNull(createdBy);
-  const dataYear = now.getFullYear();
-  const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
-
-  if (!cleanReceiveId) {
-    throw createReceiveError(
-      "receive_id required for tm_product_transactions",
-    );
-  }
-
-  if (!cleanCreatedBy) {
-    throw createReceiveError(
-      "user_id required for tm_product_transactions",
-    );
-  }
-
-  const insertTransaction = async (tableName, includeDataPeriod) => {
-    await conn.query(
-      `
-        INSERT INTO ${tableName} (
-          receive_business_id,
-          receive_walkin_id,
-          receive_code,
-
-          serial_id,
-          serial_no,
-
-          status_message,
-          status_id,
-
-          datetime,
-          update_date,
-          type,
-
-          warehouse_id,
-          created_by,
-
-          latitude,
-          longitude,
-
-          warehouse_name,
-          address,
-          province_name,
-          district_name,
-          subdistrict_name,
-          zip_code,
-
-          created_name,
-          username,
-
-          truck_license_plate,
-          user_id,
-          truck_name,
-          truck_id,
-          truck_province,
-
-          note,
-          created_date
-          ${includeDataPeriod ? `,
-
-          data_year,
-          data_yearmonth` : ""}
-        )
-        SELECT
-          r.receive_id AS receive_business_id,
-          NULL AS receive_walkin_id,
-          r.receive_code,
-
-          i.serial_id,
-          i.serial_no,
-
-          'รับเข้าระบบ' AS status_message,
-          1 AS status_id,
-
-          ? AS datetime,
-          NULL AS update_date,
-          'PUBLIC' AS type,
-
-          u.warehouse_id,
-          u.id AS created_by,
-
-          NULL AS latitude,
-          NULL AS longitude,
-
-          w.warehouse_name,
-          r.address,
-          ma.province_name,
-          ma.district_name,
-          ma.subdistrict_name,
-          r.zip_code,
-
-          TRIM(
-            CONCAT_WS(
-              ' ',
-              NULLIF(u.first_name, ''),
-              NULLIF(u.last_name, '')
-            )
-          ) AS created_name,
-          u.username,
-
-          NULL AS truck_license_plate,
-          u.id AS user_id,
-          NULL AS truck_name,
-          NULL AS truck_id,
-          NULL AS truck_province,
-
-          NULL AS note,
-          ? AS created_date
-          ${includeDataPeriod ? `,
-
-          ? AS data_year,
-          ? AS data_yearmonth` : ""}
-        FROM tm_receives r
-        INNER JOIN tm_receive_details d
-          ON d.receive_id = r.receive_id
-        INNER JOIN tm_receive_detail_items i
-          ON i.receive_detail_id = d.receive_detail_id
-        INNER JOIN um_users u
-          ON u.id = ?
-        LEFT JOIN mm_warehouses_to w
-          ON w.warehouse_id = u.warehouse_id
-        LEFT JOIN mm_master_addresses ma
-          ON ma.subdistrict_id = r.subdistrict_id
-        WHERE r.receive_id = ?
-          AND i.serial_id IS NOT NULL
-          AND i.serial_no IS NOT NULL
-          AND COALESCE(i.is_deleted, 'N') = 'N'
-      `,
-      [
-        now,
-        now,
-        ...(includeDataPeriod ? [dataYear, dataYearmonth] : []),
-        cleanCreatedBy,
-        cleanReceiveId,
-      ],
-    );
-  };
-
-  await insertTransaction("tm_product_transactions", true);
-  await insertTransaction("tm_product_transactions_last", false);
-};
+}) =>
+  insertInitialProductTransactions({
+    conn,
+    receiveId,
+    createdBy,
+    now,
+    createError: createReceiveError,
+  });

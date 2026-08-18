@@ -1,9 +1,10 @@
 // server/utils/receiveImportUtils.js
 
 import xlsx from "xlsx";
-import { randomUUID } from "crypto";
 import { cleanDbText, cleanCode, toNumberOrNull, toNumberOrZero, toYN, formatDateYYYYMMDD, padNumber, buildInsertSql } from "./cleanText.js";
 import { cleanTel } from "./cleanTel.js";
+import { createActiveProductSerialOrThrow } from "./productActiveUtils.js";
+import { insertInitialProductTransactions } from "./productTransactionUtils.js";
 
 export const createImportError = (message, statusCode = 400) => {
   const error = new Error(message);
@@ -533,7 +534,7 @@ export const updateImportLogFailed = async ({ conn, importId, queueTotal, queueP
   );
 };
 
-export const buildImportHeadData = ({ row, customerId, shipper, receiveCode, recipientAddress, shipperAddress, importDate, importId }) => {
+export const buildImportHeadData = ({ row, customerId, shipper, receiveCode, recipientAddress, shipperAddress, importDate, importId, now }) => {
   const deliveryDate = parseExcelDate(row.send_date);
 
   if (!deliveryDate) {
@@ -574,6 +575,7 @@ export const buildImportHeadData = ({ row, customerId, shipper, receiveCode, rec
     to_warehouse_id: recipientAddress.warehouse_id,
 
     import_id: importId,
+    create_date: now,
   };
 };
 
@@ -793,50 +795,12 @@ export const buildImportDetailItemData = ({ receiveDetailId, productSerial }) =>
 };
 
 export const createActiveSerialOrThrow = async (conn, serialNo, now) => {
-  const cleanSerialNo = cleanCode(serialNo);
-
-  if (!cleanSerialNo) {
-    throw createImportError("ไม่พบ SERIAL_NO");
-  }
-
-  const [existingRows] = await conn.query(
-    `
-      SELECT serial_id, serial_no
-      FROM tm_product_actived
-      WHERE serial_no = ?
-      LIMIT 1
-      FOR UPDATE
-    `,
-    [cleanSerialNo],
-  );
-
-  if (existingRows.length > 0) {
-    throw createImportError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
-  }
-
-  const serialId = randomUUID();
-
-  try {
-    await conn.query(
-      `
-        INSERT INTO tm_product_actived
-        (serial_id, serial_no, created_date)
-        VALUES (?, ?, ?)
-      `,
-      [serialId, cleanSerialNo, now],
-    );
-
-    return {
-      serial_id: serialId,
-      serial_no: cleanSerialNo,
-    };
-  } catch (error) {
-    if (error?.code === "ER_DUP_ENTRY") {
-      throw createImportError(`SERIAL_NO ${cleanSerialNo} ยังมีงานค้างอยู่`);
-    }
-
-    throw error;
-  }
+  return createActiveProductSerialOrThrow({
+    conn,
+    serialNo,
+    now,
+    createError: createImportError,
+  });
 };
 
 export const insertImportReceiveReference = async ({ conn, referenceNo, receiveId }) => {
@@ -1044,145 +1008,12 @@ export const insertImportProductTransactions = async ({
   receiveId,
   createdBy,
   now,
-}) => {
-  const cleanReceiveId = toNumberOrNull(receiveId);
-  const cleanCreatedBy = toNumberOrNull(createdBy);
-
-  if (!cleanReceiveId) {
-    throw createImportError(
-      "receive_id required for tm_product_transactions",
-    );
-  }
-
-  if (!cleanCreatedBy) {
-    throw createImportError(
-      "user_id required for tm_product_transactions",
-    );
-  }
-
-  const insertTransaction = async (tableName, includeDataPeriod) => {
-    await conn.query(
-      `
-        INSERT INTO ${tableName} (
-          receive_business_id,
-          receive_walkin_id,
-          receive_code,
-
-          serial_id,
-          serial_no,
-
-          status_message,
-          status_id,
-
-          datetime,
-          update_date,
-          type,
-
-          warehouse_id,
-          created_by,
-
-          latitude,
-          longitude,
-
-          warehouse_name,
-          address,
-          province_name,
-          district_name,
-          subdistrict_name,
-          zip_code,
-
-          created_name,
-          username,
-
-          truck_license_plate,
-          user_id,
-          truck_name,
-          truck_id,
-          truck_province,
-
-          note,
-          created_date
-          ${includeDataPeriod ? `,
-
-          data_year,
-          data_yearmonth` : ""}
-        )
-        SELECT
-          h.receive_id AS receive_business_id,
-          NULL AS receive_walkin_id,
-          h.receive_code,
-
-          i.serial_id,
-          i.serial_no,
-
-          'รับเข้าระบบ' AS status_message,
-          1 AS status_id,
-
-          ? AS datetime,
-          NULL AS update_date,
-          'PUBLIC' AS type,
-
-          u.warehouse_id,
-          u.id AS created_by,
-
-          NULL AS latitude,
-          NULL AS longitude,
-
-          w.warehouse_name,
-          h.address,
-          ma.province_name,
-          ma.district_name,
-          ma.subdistrict_name,
-          h.zip_code,
-
-          TRIM(
-            CONCAT_WS(
-              ' ',
-              NULLIF(u.first_name, ''),
-              NULLIF(u.last_name, '')
-            )
-          ) AS created_name,
-          u.username,
-
-          NULL AS truck_license_plate,
-          u.id AS user_id,
-          NULL AS truck_name,
-          NULL AS truck_id,
-          NULL AS truck_province,
-
-          NULL AS note,
-          ? AS created_date
-          ${includeDataPeriod ? `,
-
-          YEAR(NOW()) AS data_year,
-          CAST(
-            DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED
-          ) AS data_yearmonth` : ""}
-        FROM tm_receive_import_head h
-        INNER JOIN tm_receive_import_details d
-          ON d.receive_id = h.receive_id
-        INNER JOIN tm_receive_import_detail_items i
-          ON i.receive_detail_id = d.receive_detail_id
-        INNER JOIN um_users u
-          ON u.id = ?
-        LEFT JOIN mm_warehouses_to w
-          ON w.warehouse_id = u.warehouse_id
-        LEFT JOIN mm_master_addresses ma
-          ON ma.subdistrict_id = h.subdistrict_id
-        WHERE h.receive_id = ?
-          AND i.serial_id IS NOT NULL
-          AND i.serial_no IS NOT NULL
-          AND COALESCE(i.is_deleted, 'N') = 'N'
-      `,
-      [
-        now,
-        now,
-        cleanCreatedBy,
-        cleanReceiveId,
-      ],
-    );
-  };
-
-  await insertTransaction("tm_product_transactions", true);
-  await insertTransaction("tm_product_transactions_last", false);
-};
+}) =>
+  insertInitialProductTransactions({
+    conn,
+    receiveId,
+    createdBy,
+    now,
+    useDatabaseDataPeriod: true,
+    createError: createImportError,
+  });

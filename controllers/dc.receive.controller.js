@@ -131,12 +131,15 @@ export const createDcReceive = async (req, res) => {
           product_truck.serial_id,
           product_truck.serial_no,
           ?,
-          truck.to_warehouse_id,
+          COALESCE(receive_serial.to_warehouse_id, truck.to_warehouse_id),
           ?,
           ?
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.serial_no IN (${placeholders})
           AND truck.to_warehouse_id = ?
           AND product_truck.status = 'DELIVERING'
@@ -186,8 +189,13 @@ export const createDcReceive = async (req, res) => {
           vehicle.license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
-          CASE WHEN product_warehouse.to_warehouse_id <> truck.to_warehouse_id THEN 'Y' ELSE 'N' END,
-          product_warehouse.to_warehouse_id,
+          CASE
+            WHEN receive_serial.to_warehouse_id IS NOT NULL
+              AND receive_serial.to_warehouse_id <> truck.to_warehouse_id
+            THEN 'Y'
+            ELSE 'N'
+          END,
+          COALESCE(receive_serial.to_warehouse_id, product_warehouse.to_warehouse_id),
           truck.to_warehouse_id,
           ?
         FROM tm_product_trucks product_truck
@@ -195,6 +203,9 @@ export const createDcReceive = async (req, res) => {
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
           ON vehicle.id = product_truck.truck_id
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
         INNER JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = product_truck.serial_id
           AND product_warehouse.serial_no = product_truck.serial_no

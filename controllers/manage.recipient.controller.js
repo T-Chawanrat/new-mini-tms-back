@@ -52,27 +52,6 @@ export const getRecipients = async (req, res) => {
       params.push(customer_id);
     }
 
-    if (search) {
-      whereSql += `
-        AND (
-          ${buildLike("r.recipient_code", search)}
-          OR ${buildLike("r.recipient_name", search)}
-          OR ${buildLike("rt.name", search)}
-          OR ${buildLike("rd.recipient_detail_name", search)}
-          OR ${buildLike("rd.address", search)}
-          OR ${buildLike("rd.tel1", search)}
-          OR ${buildLike("rd.tel2", search)}
-          OR ${buildLike("rd.zip_code", search)}
-          OR ${buildLike("rd.line_id", search)}
-          OR ${buildLike("a.subdistrict_name", search)}
-          OR ${buildLike("a.district_name", search)}
-          OR ${buildLike("a.province_name", search)}
-          OR ${buildLike("c.code", search)}
-          OR ${buildLike("c.name", search)}
-        )
-      `;
-    }
-
     const fromSql = `
       FROM mm_recipients r
 
@@ -83,15 +62,39 @@ export const getRecipients = async (req, res) => {
       LEFT JOIN mm_recipient_types rt
         ON rt.id = r.recipient_type_id
         AND rt.is_deleted = 'N'
-
-      LEFT JOIN mm_recipient_details rd
-        ON rd.recipient_id = r.recipient_id
-
-      LEFT JOIN mm_master_addresses a
-        ON a.subdistrict_id = rd.subdistrict_id
-        AND a.district_id = rd.district_id
-        AND a.province_id = rd.province_id
     `;
+
+    if (search) {
+      whereSql += `
+        AND (
+          ${buildLike("r.recipient_code", search)}
+          OR ${buildLike("r.recipient_name", search)}
+          OR ${buildLike("rt.name", search)}
+          OR ${buildLike("c.code", search)}
+          OR ${buildLike("c.name", search)}
+          OR EXISTS (
+            SELECT 1
+            FROM mm_recipient_details rd_search
+            LEFT JOIN mm_master_addresses a_search
+              ON a_search.subdistrict_id = rd_search.subdistrict_id
+              AND a_search.district_id = rd_search.district_id
+              AND a_search.province_id = rd_search.province_id
+            WHERE rd_search.recipient_id = r.recipient_id
+              AND (
+                ${buildLike("rd_search.recipient_detail_name", search)}
+                OR ${buildLike("rd_search.address", search)}
+                OR ${buildLike("rd_search.tel1", search)}
+                OR ${buildLike("rd_search.tel2", search)}
+                OR ${buildLike("rd_search.zip_code", search)}
+                OR ${buildLike("rd_search.line_id", search)}
+                OR ${buildLike("a_search.subdistrict_name", search)}
+                OR ${buildLike("a_search.district_name", search)}
+                OR ${buildLike("a_search.province_name", search)}
+              )
+          )
+        )
+      `;
+    }
 
     const countSql = `
       SELECT COUNT(*) AS total
@@ -116,42 +119,17 @@ export const getRecipients = async (req, res) => {
         c.code AS customer_code,
         c.name AS customer_name,
 
-        rd.recipient_detail_id,
-        rd.recipient_detail_name,
-        rd.address,
-        rd.subdistrict_id,
-        rd.district_id,
-        rd.province_id,
-        rd.zip_code,
-        rd.tel1,
-        rd.tel1_ext,
-        rd.tel2,
-        rd.tel2_ext,
-        rd.is_deleted AS detail_is_deleted,
-        rd.line_id,
-        rd.longitude,
-        rd.latitude,
-
-        a.subdistrict_name,
-        a.district_name,
-        a.province_name,
-
-        COUNT(
-          CASE
-            WHEN rd.recipient_detail_id IS NOT NULL
-            THEN 1
-          END
-        ) OVER (
-          PARTITION BY r.recipient_id
+        (
+          SELECT COUNT(*)
+          FROM mm_recipient_details rd_count
+          WHERE rd_count.recipient_id = r.recipient_id
         ) AS address_count
 
       ${fromSql}
       ${whereSql}
 
       ORDER BY
-        r.recipient_id DESC,
-        CASE WHEN rd.is_deleted = 'N' THEN 0 ELSE 1 END,
-        rd.recipient_detail_id ASC
+        r.recipient_id DESC
 
       LIMIT ? OFFSET ?
     `;
@@ -169,6 +147,72 @@ export const getRecipients = async (req, res) => {
     });
   } catch (err) {
     console.error("GET RECIPIENTS ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getRecipientDetails = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+
+    const { customerId, recipientId } = req.params;
+    const isCustomer = Number(req.user.role_id) === 2;
+    const allowedCustomerId = isCustomer ? req.user.customer_id : customerId;
+
+    if (!allowedCustomerId) {
+      return res.status(403).json({ message: "customer_id required" });
+    }
+
+    const [recipientRows] = await db.query(
+      `
+        SELECT recipient_id
+        FROM mm_recipients
+        WHERE recipient_id = ?
+          AND customer_id = ?
+          AND is_deleted = 'N'
+        LIMIT 1
+      `,
+      [recipientId, allowedCustomerId],
+    );
+
+    if (!recipientRows.length) {
+      return res.status(404).json({ message: "recipient not found" });
+    }
+
+    const [rows] = await db.query(
+      `
+        SELECT
+          rd.recipient_detail_id,
+          rd.recipient_detail_name,
+          rd.address,
+          rd.subdistrict_id,
+          rd.district_id,
+          rd.province_id,
+          rd.zip_code,
+          rd.tel1,
+          rd.line_id,
+          rd.is_deleted AS detail_is_deleted,
+          a.subdistrict_name,
+          a.district_name,
+          a.province_name
+        FROM mm_recipient_details rd
+        LEFT JOIN mm_master_addresses a
+          ON a.subdistrict_id = rd.subdistrict_id
+          AND a.district_id = rd.district_id
+          AND a.province_id = rd.province_id
+        WHERE rd.recipient_id = ?
+        ORDER BY
+          CASE WHEN rd.is_deleted = 'N' THEN 0 ELSE 1 END,
+          rd.recipient_detail_id ASC
+      `,
+      [recipientId],
+    );
+
+    res.json({ data: rows });
+  } catch (err) {
+    console.error("GET RECIPIENT DETAILS ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

@@ -297,7 +297,12 @@ export const getTruckLoads = async (req, res) => {
     } = req.query;
 
     const { page, limit, offset } = getPagination(req.query.page, req.query.limit);
-    const conditions = ["COALESCE(t.is_deleted, 'N') = 'N'", "COALESCE(t.is_arrived, 'N') <> 'Y'", "t.warehouse_id = ?"];
+    const conditions = [
+      "COALESCE(t.is_deleted, 'N') = 'N'",
+      "COALESCE(t.is_arrived, 'N') <> 'Y'",
+      "t.warehouse_id = ?",
+      "t.status = 'DC_TRUCK_DC'",
+    ];
     const params = [warehouseId];
     const search = cleanCode(truck_code);
 

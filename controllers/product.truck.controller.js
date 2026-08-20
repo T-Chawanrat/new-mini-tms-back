@@ -15,6 +15,8 @@ export const getProductTrucks = async (req, res) => {
     const offset = (page - 1) * limit;
     const search = String(req.query.search || "").trim().slice(0, 200);
     const exportAll = req.query.export === "1";
+    const requestedTruckType = String(req.query.truck_type || "").trim().toUpperCase();
+    const truckType = ["DC_TRUCK", "DC_TRUCK_DC"].includes(requestedTruckType) ? requestedTruckType : null;
     const searchValue = `%${search}%`;
     const searchConditions = search
       ? `
@@ -29,11 +31,13 @@ export const getProductTrucks = async (req, res) => {
             OR COALESCE(vehicle.model, contractor_vehicle.model) LIKE ?
             OR truck.driver_type LIKE ?
             OR warehouse_from.warehouse_name LIKE ? OR warehouse_to.warehouse_name LIKE ?
+            OR route.route_code LIKE ? OR route.route_name LIKE ?
             OR product_truck.status LIKE ? OR truck.status LIKE ?
             OR TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)) LIKE ?
           )`
       : "";
-    const searchParams = search ? Array(16).fill(searchValue) : [];
+    const searchParams = search ? Array(18).fill(searchValue) : [];
+    const truckTypeCondition = truckType ? "AND truck.status = ?" : "";
 
     const fromAndWhere = `
       FROM tm_product_trucks product_truck
@@ -49,12 +53,14 @@ export const getProductTrucks = async (req, res) => {
       LEFT JOIN mm_province contractor_province ON contractor_province.id = contractor_vehicle.license_plate_province_id
       LEFT JOIN mm_warehouses_to warehouse_from ON warehouse_from.warehouse_id = truck.warehouse_id
       LEFT JOIN mm_warehouses_to warehouse_to ON warehouse_to.warehouse_id = truck.to_warehouse_id
+      LEFT JOIN mm_routes route ON route.route_id = truck.route_id
       WHERE COALESCE(truck.is_deleted, 'N') = 'N'
         AND product_truck.status IN ('LOADED', 'DELIVERING')
         AND truck.warehouse_id = ?
+        ${truckTypeCondition}
         ${searchConditions}
     `;
-    const baseParams = [warehouseId, ...searchParams];
+    const baseParams = [warehouseId, ...(truckType ? [truckType] : []), ...searchParams];
 
     const [summaryRows] = await db.query(
       `SELECT COUNT(*) AS total_items ${fromAndWhere}`,
@@ -85,6 +91,8 @@ export const getProductTrucks = async (req, res) => {
           truck.status AS truck_status,
           truck.warehouse_id,
           truck.to_warehouse_id,
+          route.route_code,
+          route.route_name,
           truck.is_close,
           truck.is_go,
           COALESCE(

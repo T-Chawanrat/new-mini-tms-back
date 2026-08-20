@@ -25,6 +25,7 @@ import dcReceiveRoutes from "./routes/dc.receive.routes.js";
 import moveTkRoutes from "./routes/move.tk.routes.js";
 import contractorRoutes from "./routes/contractor.routes.js";
 import driverAuthRoute from "./routes/auth.driver.routes.js";
+import deliveryTruckRoutes from "./routes/delivery.truck.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,6 +60,7 @@ app.use("/warehouse-receives", warehouseReceiveRoutes);
 app.use("/product-warehouses", productWarehouseRoutes);
 app.use("/product-trucks", productTruckRoutes);
 app.use("/truck-loads", truckLoadRoutes);
+app.use("/delivery-trucks", deliveryTruckRoutes);
 app.use("/dc-receives", dcReceiveRoutes);
 app.use("/move-tk", moveTkRoutes);
 app.use("/contractors", contractorRoutes);

@@ -1,5 +1,3 @@
-import { randomInt } from "crypto";
-
 import db from "../config/db.js";
 import { cleanCode, cleanDbText, toNumberOrNull } from "../utils/cleanText.js";
 import { syncTruckBoxCount } from "../utils/truckUtils.js";
@@ -17,15 +15,41 @@ const createTemporaryTruckCode = async (connection, now) => {
   }).formatToParts(now);
   const getPart = (type) => parts.find((part) => part.type === type)?.value || "";
   const dateCode = `${getPart("year")}${getPart("month")}${getPart("day")}`;
+  const temporaryCodePrefix = `${dateCode}-`;
+  const closedCodePrefix = `TK-${dateCode}-`;
+  const lockName = `truck_code_${dateCode}`;
+  let hasLock = false;
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const code = `${dateCode}-${String(randomInt(0, 1_000_000)).padStart(6, "0")}`;
-    const [rows] = await connection.query("SELECT 1 FROM tm_trucks WHERE truck_code = ? LIMIT 1", [code]);
+  try {
+    const [[lockRow]] = await connection.query("SELECT GET_LOCK(?, 10) AS lock_acquired", [lockName]);
 
-    if (!rows.length) return code;
+    if (Number(lockRow.lock_acquired) !== 1) {
+      throw new Error("unable to reserve delivery truck code running number");
+    }
+
+    hasLock = true;
+
+    const [[runningRow]] = await connection.query(
+      `
+        SELECT COALESCE(MAX(CAST(RIGHT(truck_code, 4) AS UNSIGNED)), 0) AS last_no
+        FROM tm_trucks
+        WHERE (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 11)
+           OR (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 14)
+      `,
+      [`${temporaryCodePrefix}%`, `${closedCodePrefix}%`],
+    );
+    const nextRunning = Number(runningRow.last_no) + 1;
+
+    if (nextRunning > 9999) {
+      throw new Error("delivery truck code running number is exhausted for today");
+    }
+
+    return `${temporaryCodePrefix}${String(nextRunning).padStart(4, "0")}`;
+  } finally {
+    if (hasLock) {
+      await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
+    }
   }
-
-  throw new Error("unable to generate temporary delivery truck code");
 };
 
 export const getDeliveryTruckOptions = async (req, res) => {

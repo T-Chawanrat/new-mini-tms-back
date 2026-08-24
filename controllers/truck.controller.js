@@ -1,7 +1,5 @@
 // server/controllers/truck.controller.js
 
-import { randomInt } from "crypto";
-
 import db from "../config/db.js";
 import {
   cleanCode,
@@ -19,28 +17,42 @@ const createTruckCode = async (connection, now) => {
     day: "2-digit",
   }).formatToParts(now);
   const getPart = (type) => dateParts.find((part) => part.type === type)?.value || "";
-  const temporaryTruckCodeDate = `${getPart("year")}${getPart("month")}${getPart("day")}`;
+  const dateCode = `${getPart("year")}${getPart("month")}${getPart("day")}`;
+  const temporaryCodePrefix = `${dateCode}-`;
+  const closedCodePrefix = `TK-${dateCode}-`;
+  const lockName = `truck_code_${dateCode}`;
+  let hasLock = false;
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const randomNumber = String(randomInt(0, 1_000_000)).padStart(6, "0");
-    const temporaryTruckCode = `${temporaryTruckCodeDate}-${randomNumber}`;
+  try {
+    const [[lockRow]] = await connection.query("SELECT GET_LOCK(?, 10) AS lock_acquired", [lockName]);
 
-    const [existingRows] = await connection.query(
+    if (Number(lockRow.lock_acquired) !== 1) {
+      throw new Error("unable to reserve truck_code running number");
+    }
+
+    hasLock = true;
+
+    const [[runningRow]] = await connection.query(
       `
-        SELECT 1
+        SELECT COALESCE(MAX(CAST(RIGHT(truck_code, 4) AS UNSIGNED)), 0) AS last_no
         FROM tm_trucks
-        WHERE truck_code = ?
-        LIMIT 1
+        WHERE (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 11)
+           OR (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 14)
       `,
-      [temporaryTruckCode],
+      [`${temporaryCodePrefix}%`, `${closedCodePrefix}%`],
     );
+    const nextRunning = Number(runningRow.last_no) + 1;
 
-    if (!existingRows.length) {
-      return temporaryTruckCode;
+    if (nextRunning > 9999) {
+      throw new Error("truck_code running number is exhausted for today");
+    }
+
+    return `${temporaryCodePrefix}${String(nextRunning).padStart(4, "0")}`;
+  } finally {
+    if (hasLock) {
+      await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
     }
   }
-
-  throw new Error("unable to generate unique truck_code");
 };
 
 const TRUCK_SELECT_FIELDS = `

@@ -94,6 +94,7 @@ export const getMoveTkTargetTrucks = async (req, res) => {
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
           AND truck.id <> source_truck.id
           AND truck.warehouse_id = source_truck.warehouse_id
+          AND truck.status = 'DC_TRUCK_DC'
         ORDER BY truck.create_date DESC, truck.id DESC
       `,
       [sourceTruckLoadId, warehouseId],
@@ -195,7 +196,7 @@ export const moveTkProducts = async (req, res) => {
 
     const [truckRows] = await connection.query(
       `
-        SELECT id, is_close, to_warehouse_id, warehouse_id
+        SELECT id, is_close, to_warehouse_id, warehouse_id, status
         FROM tm_trucks
         WHERE id IN (?, ?)
           AND COALESCE(is_deleted, 'N') = 'N'
@@ -208,7 +209,7 @@ export const moveTkProducts = async (req, res) => {
     const sourceTruck = truckRows.find((row) => Number(row.id) === sourceTruckLoadId);
     const targetTruck = truckRows.find((row) => Number(row.id) === targetTruckLoadId);
 
-    if (!sourceTruck || !targetTruck || sourceTruck.is_close !== "Y") {
+    if (!sourceTruck || !targetTruck || sourceTruck.is_close !== "Y" || targetTruck.status !== "DC_TRUCK_DC") {
       await connection.rollback();
       transactionStarted = false;
       return res.status(400).json({ success: false, message: "ไม่พบใบต้นทาง/ปลายทาง หรือใบต้นทางยังไม่ปิดบรรทุก" });

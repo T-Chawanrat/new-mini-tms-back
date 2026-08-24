@@ -193,6 +193,8 @@ export const getRecipientDetails = async (req, res) => {
           rd.zip_code,
           rd.tel1,
           rd.line_id,
+          rd.longitude,
+          rd.latitude,
           rd.is_deleted AS detail_is_deleted,
           a.subdistrict_name,
           a.district_name,

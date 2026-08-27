@@ -52,6 +52,7 @@ export const getProductWarehouses = async (req, res) => {
       LEFT JOIN um_users creator ON creator.id = product_warehouse.created_by
       LEFT JOIN mm_warehouses_to warehouse_now ON warehouse_now.warehouse_id = product_warehouse.now_warehouse_id
       LEFT JOIN mm_warehouses_to warehouse_to ON warehouse_to.warehouse_id = product_warehouse.to_warehouse_id
+      LEFT JOIN mm_routes route ON route.route_id = product_warehouse.route_id
       WHERE NULLIF(TRIM(receive_serial.receive_code), '') IS NOT NULL
         AND product_warehouse.now_warehouse_id = ?
         ${searchConditions}
@@ -88,6 +89,7 @@ export const getProductWarehouses = async (req, res) => {
           MAX(warehouse_to.warehouse_name) AS to_warehouse_name,
           MAX(product_warehouse.created_by) AS created_by,
           MAX(NULLIF(TRIM(CONCAT_WS(' ', NULLIF(creator.first_name, ''), NULLIF(creator.last_name, ''))), '')) AS created_name,
+          GROUP_CONCAT(DISTINCT NULLIF(TRIM(route.route_name), '') ORDER BY route.route_name SEPARATOR ', ') AS route_name,
           COUNT(DISTINCT product_warehouse.serial_no) AS total_items,
           GROUP_CONCAT(DISTINCT product_warehouse.serial_no ORDER BY product_warehouse.serial_no SEPARATOR ', ') AS serial_nos,
           GROUP_CONCAT(

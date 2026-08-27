@@ -192,7 +192,7 @@ export const getWarehouses = async (req, res) => {
     const [rows] = await db.query(`
       SELECT id, name
       FROM mm_warehouses
-      ORDER BY id ASC
+      ORDER BY name ASC
     `);
 
     res.json(rows);

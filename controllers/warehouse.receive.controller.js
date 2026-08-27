@@ -107,8 +107,12 @@ export const createWarehouseReceive = async (req, res) => {
         SELECT DISTINCT
           product_customer.serial_id,
           product_customer.serial_no,
-          product_customer.to_warehouse_id
+          product_customer.to_warehouse_id,
+          receive_serial.route_id
         FROM tm_product_customers product_customer
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_customer.serial_id
+          AND receive_serial.serial_no = product_customer.serial_no
         WHERE product_customer.serial_no IN (${placeholders})
       `,
       serialNos,
@@ -163,7 +167,7 @@ export const createWarehouseReceive = async (req, res) => {
       warehouseId,
       toNumberOrNull(row.to_warehouse_id),
       null,
-      null,
+      toNumberOrNull(row.route_id),
       resendDate,
       createdBy,
       now,

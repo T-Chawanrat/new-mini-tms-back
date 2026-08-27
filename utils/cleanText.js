@@ -32,6 +32,19 @@ export const cleanCode = (value) => {
 };
 
 /**
+ * ใช้กับรหัสสายรถ: A-Z, ตัวเลข และ - เท่านั้น
+ */
+export const cleanRouteCode = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+
+  const code = String(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
+
+  return code || null;
+};
+
+/**
  * ใช้กับชื่อไฟล์
  */
 export const cleanFileNamePart = (value) => {

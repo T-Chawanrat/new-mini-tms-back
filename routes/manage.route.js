@@ -6,6 +6,7 @@ import manageVehicleRoutes from "./manage.vehicle.route.js";
 import manageShipperRoutes from "./manage.shipper.route.js";
 import manageRecipientRoutes from "./manage.recipient.route.js";
 import managePackageRoutes from "./manage.package.route.js";
+import manageRoute from "./manage.route.route.js";
 
 const router = express.Router();
 
@@ -15,5 +16,8 @@ router.use("/vehicles", manageVehicleRoutes);
 router.use("/shippers", manageShipperRoutes);
 router.use("/recipients", manageRecipientRoutes);
 router.use("/packages", managePackageRoutes);
+router.use("/routes", manageRoute);
+
+
 
 export default router;

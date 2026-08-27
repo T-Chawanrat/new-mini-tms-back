@@ -314,6 +314,7 @@ export const insertCreateReceiveSerials = async (
 
         from_warehouse_id,
         to_warehouse_id,
+        route_id,
 
         recipient_name,
         recipient_code,
@@ -381,6 +382,7 @@ export const insertCreateReceiveSerials = async (
 
         r.from_warehouse_id,
         r.to_warehouse_id,
+        route.route_id,
 
         r.recipient_name,
         rec.recipient_code,
@@ -440,6 +442,11 @@ export const insertCreateReceiveSerials = async (
         ON rd.recipient_detail_id = r.recipient_detail_id
       LEFT JOIN mm_master_addresses ma
         ON ma.subdistrict_id = r.subdistrict_id
+      LEFT JOIN mm_route_details route_detail
+        ON route_detail.subdistrict_id = r.subdistrict_id
+      LEFT JOIN mm_routes route
+        ON route.route_id = route_detail.route_id
+        AND route.is_deleted = 'N'
       LEFT JOIN mm_shippers s
         ON s.shipper_id = r.shipper_id
       WHERE r.receive_id = ?

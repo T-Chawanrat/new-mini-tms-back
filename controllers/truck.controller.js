@@ -1219,6 +1219,17 @@ export const deleteTruckLoad = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบใบปิดบรรทุก หรือใบนี้ถูกลบแล้ว" });
     }
 
+    const [productRows] = await connection.query(
+      `SELECT id FROM tm_product_trucks WHERE truck_load_id = ? LIMIT 1 FOR UPDATE`,
+      [truckLoadId],
+    );
+
+    if (productRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ไม่สามารถลบใบปิดบรรทุกได้ เนื่องจากยังมีสินค้าอยู่บนรถ" });
+    }
+
     await connection.query(
       `
         INSERT INTO tm_product_warehouses (

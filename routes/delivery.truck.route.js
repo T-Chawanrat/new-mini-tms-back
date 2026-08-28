@@ -1,6 +1,16 @@
 import express from "express";
 
-import { createDeliveryTruck, deleteDeliveryTruck, getDeliveryTruckById, getDeliveryTruckOptions, getDeliveryTruckPrint, getDeliveryTruckProducts, getDeliveryTrucks, loadDeliveryTruckProduct, unloadDeliveryTruckProduct } from "../controllers/delivery.truck.controller.js";
+import {
+  createDeliveryTruck,
+  deleteDeliveryTruck,
+  getDeliveryTruckById,
+  getDeliveryTruckOptions,
+  getDeliveryTruckPrint,
+  getDeliveryTruckProducts,
+  getDeliveryTrucks,
+  loadDeliveryTruckProduct,
+  unloadDeliveryTruckProduct,
+} from "../controllers/delivery.truck.controller.js";
 import { auth } from "../middlewares/auth.js";
 
 const router = express.Router();

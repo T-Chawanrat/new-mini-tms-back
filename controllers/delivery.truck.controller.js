@@ -287,10 +287,11 @@ export const getDeliveryTruckProducts = async (req, res) => {
         LEFT JOIN mm_customers customer
           ON customer.id = receive_serial.customer_id
         WHERE product_warehouse.now_warehouse_id = ?
+          AND product_warehouse.to_warehouse_id = ?
           AND NULLIF(TRIM(product_warehouse.serial_no), '') IS NOT NULL
         ORDER BY product_warehouse.id ASC
       `,
-      [truck.warehouse_id],
+      [truck.warehouse_id, truck.warehouse_id],
     );
 
     const [loadedRows] = await db.query(
@@ -420,6 +421,7 @@ export const loadDeliveryTruckProduct = async (req, res) => {
   try {
     const truckLoadId = toNumberOrNull(req.params.truckLoadId);
     const serialNo = cleanCode(req.body.serial_no);
+    const confirmRouteWarning = req.body.confirm_route_warning === true;
     const actorId = getActorId(req);
     const warehouseId = getWarehouseId(req);
 
@@ -461,14 +463,19 @@ export const loadDeliveryTruckProduct = async (req, res) => {
 
     const [productRows] = await connection.query(
       `
-        SELECT id, serial_id, serial_no, to_warehouse_id, resend_date
-        FROM tm_product_warehouses
-        WHERE serial_no = ?
-          AND now_warehouse_id = ?
+        SELECT product_warehouse.id, product_warehouse.serial_id, product_warehouse.serial_no,
+          product_warehouse.to_warehouse_id, product_warehouse.route_id, product_warehouse.resend_date
+        FROM tm_product_warehouses product_warehouse
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_warehouse.serial_id
+          AND product_active.serial_no = product_warehouse.serial_no
+        WHERE product_warehouse.serial_no = ?
+          AND product_warehouse.now_warehouse_id = ?
+          AND product_warehouse.to_warehouse_id = ?
         LIMIT 1
         FOR UPDATE
       `,
-      [serialNo, truck.warehouse_id],
+      [serialNo, truck.warehouse_id, truck.warehouse_id],
     );
     const product = productRows[0];
 
@@ -476,6 +483,23 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       await connection.rollback();
       transactionStarted = false;
       return res.status(404).json({ success: false, message: "ไม่พบ Serial No ในคลังนี้" });
+    }
+
+    const routeWarningCode = product.route_id === null
+      ? "ROUTE_MISSING"
+      : String(product.route_id) !== String(truck.route_id)
+        ? "ROUTE_MISMATCH"
+        : null;
+
+    if (routeWarningCode && !confirmRouteWarning) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({
+        success: false,
+        code: routeWarningCode,
+        message: routeWarningCode === "ROUTE_MISSING" ? "สินค้านี้ยังไม่ได้กำหนดสายรถ" : "สินค้านี้อยู่คนละสายรถกับใบรถกระจาย",
+        data: { serial_no: product.serial_no, route_id: product.route_id },
+      });
     }
 
     const [activeRows] = await connection.query(
@@ -507,11 +531,11 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       `
         INSERT INTO tm_product_trucks (
           serial_id, serial_no, created_by, user_truck_id, driver_name,
-          truck_id, status, resend_date, truck_load_id, created_date
+          truck_id, status, resend_date, truck_load_id, route_id, created_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?)
       `,
-      [product.serial_id, product.serial_no, actorId, truck.user_truck_id, truck.driver_name, truck.vehicle_id ?? truck.vehicle_contractor_id, product.resend_date, truckLoadId, now],
+      [product.serial_id, product.serial_no, actorId, truck.user_truck_id, truck.driver_name, truck.vehicle_id ?? truck.vehicle_contractor_id, product.resend_date, truckLoadId, product.route_id, now],
     );
 
     await connection.query(
@@ -586,7 +610,7 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
           product_truck.id, product_truck.serial_id, product_truck.serial_no,
           product_truck.resend_date, product_truck.user_truck_id, product_truck.driver_name,
           product_truck.truck_id, product_truck.status, truck.warehouse_id,
-          truck.route_id, receive_serial.to_warehouse_id
+          product_truck.route_id, receive_serial.to_warehouse_id
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
         LEFT JOIN tm_receive_serials receive_serial
@@ -700,13 +724,24 @@ export const deleteDeliveryTruck = async (req, res) => {
       return res.status(409).json({ success: false, message: "ไม่พบใบรถกระจาย หรือใบรถถูกปล่อยแล้ว" });
     }
 
+    const [activeProductRows] = await connection.query(
+      `SELECT id FROM tm_product_trucks WHERE truck_load_id = ? LIMIT 1 FOR UPDATE`,
+      [truckLoadId],
+    );
+
+    if (activeProductRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ไม่สามารถลบใบรถกระจายได้ เนื่องจากยังมีสินค้าอยู่บนรถ" });
+    }
+
     const [products] = await connection.query(
       `
         SELECT
           product_truck.id, product_truck.serial_id, product_truck.serial_no,
           product_truck.resend_date, product_truck.user_truck_id,
           product_truck.driver_name, product_truck.truck_id, product_truck.status,
-          receive_serial.to_warehouse_id
+          product_truck.route_id, receive_serial.to_warehouse_id
         FROM tm_product_trucks product_truck
         LEFT JOIN tm_receive_serials receive_serial
           ON receive_serial.serial_id = product_truck.serial_id
@@ -727,7 +762,7 @@ export const deleteDeliveryTruck = async (req, res) => {
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, truck.route_id, product.resend_date, actorId, now],
+        [product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, product.route_id, product.resend_date, actorId, now],
       );
 
       await connection.query(

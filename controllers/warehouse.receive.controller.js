@@ -5,6 +5,8 @@ import { formatDateOnly } from "../utils/formatDate.js";
 export const getWarehouseReceiveSerials = async (req, res) => {
   try {
     const customerId = toNumberOrNull(req.query.customer_id);
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
 
     const where = [];
     const params = [];
@@ -41,11 +43,41 @@ export const getWarehouseReceiveSerials = async (req, res) => {
     `;
 
     const [rows] = await db.query(sql, params);
+    const [receivedRows] = actorId && warehouseId
+      ? await db.query(
+          `
+            SELECT
+              product_warehouse.serial_no,
+              receive_serial.customer_id,
+              customer.name AS customer_name,
+              product_warehouse.to_warehouse_id,
+              destination.warehouse_name AS to_warehouse_name
+            FROM logs_product_warehouses log
+            INNER JOIN tm_product_warehouses product_warehouse
+              ON product_warehouse.id = log.product_warehouse_id
+            LEFT JOIN tm_receive_serials receive_serial
+              ON receive_serial.serial_id = product_warehouse.serial_id
+              AND receive_serial.serial_no = product_warehouse.serial_no
+            LEFT JOIN mm_customers customer
+              ON customer.id = receive_serial.customer_id
+            LEFT JOIN mm_warehouses_to destination
+              ON destination.warehouse_id = product_warehouse.to_warehouse_id
+            WHERE log.event_type = 'RECEIVE_IN'
+              AND log.created_by = ?
+              AND log.now_warehouse_id = ?
+              AND DATE(log.created_date) = CURDATE()
+              ${customerId !== null ? "AND receive_serial.customer_id = ?" : ""}
+            ORDER BY log.id DESC
+          `,
+          customerId !== null ? [actorId, warehouseId, customerId] : [actorId, warehouseId],
+        )
+      : [[]];
 
     return res.status(200).json({
       success: true,
       total: rows.length,
       data: rows,
+      received: receivedRows,
     });
   } catch (error) {
     console.error("getWarehouseReceiveSerials error:", error);

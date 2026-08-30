@@ -111,6 +111,7 @@ export const getMoveTkProducts = async (req, res) => {
   try {
     const truckLoadId = toNumberOrNull(req.params.truckLoadId);
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+    const includeOpen = req.query.include_open === "Y";
 
     if (!truckLoadId || !warehouseId) {
       return res.status(400).json({ success: false, message: "truck_load_id ไม่ถูกต้อง" });
@@ -150,7 +151,7 @@ export const getMoveTkProducts = async (req, res) => {
         LEFT JOIN mm_warehouses_to destination
           ON destination.warehouse_id = COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id)
         WHERE product_truck.truck_load_id = ?
-          AND truck.is_close = 'Y'
+          AND (${includeOpen ? "1 = 1" : "truck.is_close = 'Y'"})
           AND COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
           AND truck.warehouse_id = ?

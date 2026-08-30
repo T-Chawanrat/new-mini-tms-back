@@ -30,7 +30,10 @@ export const getRoutes = async (req, res) => {
         rd.subdistrict_id,
         rdd.id AS route_detail_day_id,
         rdd.day,
-        address.subdistrict_name AS subdistrict_name
+        address.subdistrict_name AS subdistrict_name,
+        address.district_name AS district_name,
+        address.province_name AS province_name,
+        address.zip_code AS zip_code
       FROM mm_routes r
       LEFT JOIN mm_warehouses_to warehouse ON warehouse.warehouse_id = r.warehouse_id
       LEFT JOIN mm_route_details rd ON rd.route_id = r.route_id
@@ -141,15 +144,14 @@ export const createRouteDetail = async (req, res) => {
     const [duplicateRows] = await connection.query(
       `SELECT rd.route_detail_id
        FROM mm_route_details rd
-       WHERE rd.route_id = ?
-         AND rd.subdistrict_id = ?
+       WHERE rd.subdistrict_id = ?
        LIMIT 1`,
-      [routeId, subdistrictId],
+      [subdistrictId],
     );
 
     if (duplicateRows.length) {
       await connection.rollback();
-      return res.status(409).json({ message: "ตำบลนี้มีอยู่ในสายรถนี้แล้ว" });
+      return res.status(409).json({ message: "ตำบลนี้ถูกกำหนดอยู่ในสายรถอื่นแล้ว" });
     }
 
     const [detailResult] = await connection.query(`INSERT INTO mm_route_details (route_id, subdistrict_id) VALUES (?, ?)`, [routeId, subdistrictId]);
@@ -194,13 +196,13 @@ export const updateRouteDetail = async (req, res) => {
     }
 
     const [duplicateRows] = await connection.query(
-      `SELECT route_detail_id FROM mm_route_details WHERE route_id = ? AND subdistrict_id = ? AND route_detail_id <> ? LIMIT 1`,
-      [routeId, subdistrictId, routeDetailId],
+      `SELECT route_detail_id FROM mm_route_details WHERE subdistrict_id = ? AND route_detail_id <> ? LIMIT 1`,
+      [subdistrictId, routeDetailId],
     );
 
     if (duplicateRows.length) {
       await connection.rollback();
-      return res.status(409).json({ message: "ตำบลนี้มีอยู่ในสายรถนี้แล้ว" });
+      return res.status(409).json({ message: "ตำบลนี้ถูกกำหนดอยู่ในสายรถอื่นแล้ว" });
     }
 
     await connection.query(`UPDATE mm_route_details SET subdistrict_id = ? WHERE route_detail_id = ?`, [subdistrictId, routeDetailId]);

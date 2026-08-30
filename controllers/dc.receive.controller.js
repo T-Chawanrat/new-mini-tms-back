@@ -9,6 +9,7 @@ const cleanSerialNos = (value) =>
 export const getDcReceiveSerials = async (req, res) => {
   try {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
 
     if (!warehouseId) {
       return res.status(400).json({ success: false, message: "ผู้ใช้งานยังไม่ได้กำหนดคลัง DC" });
@@ -56,7 +57,34 @@ export const getDcReceiveSerials = async (req, res) => {
       [warehouseId, warehouseId],
     );
 
-    return res.status(200).json({ success: true, total: rows.length, data: rows });
+    const [receivedRows] = actorId
+      ? await db.query(
+          `
+            SELECT
+              log.serial_id,
+              log.serial_no,
+              log.created_date AS movement_date,
+              log.truck_load_id,
+              truck.truck_code,
+              log.driver_name,
+              log.truck_license_plate AS license_plate,
+              province.province_name AS license_province
+            FROM logs_product_trucks log
+            LEFT JOIN tm_trucks truck
+              ON truck.id = log.truck_load_id
+            LEFT JOIN mm_province province
+              ON province.id = log.license_plate_province_id
+            WHERE log.event_type = 'UNLOAD'
+              AND log.created_by = ?
+              AND log.truck_to_warehouse_id = ?
+              AND DATE(log.created_date) = CURDATE()
+            ORDER BY log.id DESC
+          `,
+          [actorId, warehouseId],
+        )
+      : [[]];
+
+    return res.status(200).json({ success: true, total: rows.length, data: rows, received: receivedRows });
   } catch (error) {
     console.error("getDcReceiveSerials error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการรอรับเข้า DC ได้" });

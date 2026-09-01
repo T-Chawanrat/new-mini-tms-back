@@ -16,8 +16,7 @@ const createTemporaryTruckCode = async (connection, now) => {
   const getPart = (type) => parts.find((part) => part.type === type)?.value || "";
   const dateCode = `${getPart("year")}${getPart("month")}${getPart("day")}`;
   const temporaryCodePrefix = `${dateCode}-`;
-  const closedCodePrefix = `TK-${dateCode}-`;
-  const lockName = `truck_code_${dateCode}`;
+  const lockName = `delivery_truck_temporary_code_${dateCode}`;
   let hasLock = false;
 
   try {
@@ -33,10 +32,10 @@ const createTemporaryTruckCode = async (connection, now) => {
       `
         SELECT COALESCE(MAX(CAST(RIGHT(truck_code, 4) AS UNSIGNED)), 0) AS last_no
         FROM tm_trucks
-        WHERE (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 11)
-           OR (truck_code LIKE ? AND CHAR_LENGTH(truck_code) = 14)
+        WHERE truck_code LIKE ?
+          AND CHAR_LENGTH(truck_code) = 11
       `,
-      [`${temporaryCodePrefix}%`, `${closedCodePrefix}%`],
+      [`${temporaryCodePrefix}%`],
     );
     const nextRunning = Number(runningRow.last_no) + 1;
 
@@ -50,6 +49,152 @@ const createTemporaryTruckCode = async (connection, now) => {
       await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
     }
   }
+};
+
+const createClosedDeliveryTruckCode = async (connection, now) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const getPart = (type) => parts.find((part) => part.type === type)?.value || "";
+  const dateCode = `${getPart("year")}${getPart("month")}${getPart("day")}`;
+  const codePrefix = `DT-${dateCode}-`;
+  const lockName = `delivery_truck_code_${dateCode}`;
+  let hasLock = false;
+
+  try {
+    const [[lockRow]] = await connection.query("SELECT GET_LOCK(?, 10) AS lock_acquired", [lockName]);
+
+    if (Number(lockRow.lock_acquired) !== 1) {
+      throw new Error("unable to reserve closed delivery truck code running number");
+    }
+
+    hasLock = true;
+    const [[runningRow]] = await connection.query(
+      `
+        SELECT COALESCE(MAX(CAST(RIGHT(truck_code, 4) AS UNSIGNED)), 0) AS last_no
+        FROM tm_trucks
+        WHERE truck_code LIKE ?
+          AND CHAR_LENGTH(truck_code) = 14
+      `,
+      [`${codePrefix}%`],
+    );
+    const nextRunning = Number(runningRow.last_no) + 1;
+
+    if (nextRunning > 9999) {
+      throw new Error("delivery truck code running number is exhausted for today");
+    }
+
+    return `${codePrefix}${String(nextRunning).padStart(4, "0")}`;
+  } finally {
+    if (hasLock) {
+      await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
+    }
+  }
+};
+
+const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId, statusId, statusMessage, now }) => {
+  const dataYear = now.getFullYear();
+  const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
+
+  await connection.query(
+    `
+      INSERT INTO tm_product_transactions (
+        receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no,
+        status_message, status_id, datetime, update_date, type,
+        warehouse_id, created_by, latitude, longitude, warehouse_name,
+        address, province_name, district_name, subdistrict_name, zip_code,
+        created_name, username, truck_license_plate, user_id, user_truck_id,
+        truck_name, truck_id, vehicle_contractor_id, truck_province, note,
+        data_year, data_yearmonth
+      )
+      SELECT
+        transaction_last.receive_business_id,
+        transaction_last.receive_walkin_id,
+        transaction_last.receive_code,
+        transaction_last.serial_id,
+        transaction_last.serial_no,
+        ?, ?, ?, NULL, 'PUBLIC',
+        truck.warehouse_id, actor.id, transaction_last.latitude, transaction_last.longitude, warehouse.warehouse_name,
+        transaction_last.address, transaction_last.province_name, transaction_last.district_name, transaction_last.subdistrict_name, transaction_last.zip_code,
+        TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+        actor.username,
+        COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        truck.user_truck_id,
+        truck.user_truck_id,
+        truck.truck_code,
+        truck.vehicle_id,
+        truck.vehicle_contractor_id,
+        COALESCE(plate_province.province_name, contractor_plate_province.province_name),
+        transaction_last.note,
+        ?, ?
+      FROM tm_product_transactions_last transaction_last
+      INNER JOIN tm_product_trucks product_truck
+        ON product_truck.serial_id = transaction_last.serial_id
+        AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_trucks truck
+        ON truck.id = product_truck.truck_load_id
+      INNER JOIN um_users actor
+        ON actor.id = ?
+      LEFT JOIN mm_warehouses_to warehouse
+        ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_vehicles vehicle
+        ON vehicle.id = product_truck.truck_id
+      LEFT JOIN mm_vehicles_contractor contractor_vehicle
+        ON contractor_vehicle.id = truck.vehicle_contractor_id
+      LEFT JOIN mm_province plate_province
+        ON plate_province.id = vehicle.license_plate_province_id
+      LEFT JOIN mm_province contractor_plate_province
+        ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
+      WHERE product_truck.truck_load_id = ?
+    `,
+    [statusMessage, statusId, now, dataYear, dataYearmonth, actorId, truckLoadId],
+  );
+
+  await connection.query(
+    `
+      UPDATE tm_product_transactions_last transaction_last
+      INNER JOIN tm_product_trucks product_truck
+        ON product_truck.serial_id = transaction_last.serial_id
+        AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_trucks truck
+        ON truck.id = product_truck.truck_load_id
+      INNER JOIN um_users actor
+        ON actor.id = ?
+      LEFT JOIN mm_warehouses_to warehouse
+        ON warehouse.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_vehicles vehicle
+        ON vehicle.id = product_truck.truck_id
+      LEFT JOIN mm_vehicles_contractor contractor_vehicle
+        ON contractor_vehicle.id = truck.vehicle_contractor_id
+      LEFT JOIN mm_province plate_province
+        ON plate_province.id = vehicle.license_plate_province_id
+      LEFT JOIN mm_province contractor_plate_province
+        ON contractor_plate_province.id = contractor_vehicle.license_plate_province_id
+      SET
+        transaction_last.status_message = ?,
+        transaction_last.status_id = ?,
+        transaction_last.datetime = ?,
+        transaction_last.update_date = ?,
+        transaction_last.type = 'PUBLIC',
+        transaction_last.warehouse_id = truck.warehouse_id,
+        transaction_last.created_by = actor.id,
+        transaction_last.warehouse_name = warehouse.warehouse_name,
+        transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
+        transaction_last.username = actor.username,
+        transaction_last.truck_license_plate = COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        transaction_last.user_id = truck.user_truck_id,
+        transaction_last.user_truck_id = truck.user_truck_id,
+        transaction_last.truck_name = truck.truck_code,
+        transaction_last.truck_id = truck.vehicle_id,
+        transaction_last.vehicle_contractor_id = truck.vehicle_contractor_id,
+        transaction_last.truck_province = COALESCE(plate_province.province_name, contractor_plate_province.province_name)
+      WHERE product_truck.truck_load_id = ?
+    `,
+    [actorId, statusMessage, statusId, now, now, truckLoadId],
+  );
 };
 
 export const getDeliveryTruckOptions = async (req, res) => {
@@ -411,6 +556,119 @@ export const getDeliveryTruckPrint = async (req, res) => {
   } catch (error) {
     console.error("getDeliveryTruckPrint error:", error);
     res.status(500).json({ success: false, message: "ไม่สามารถโหลดข้อมูลสำหรับพิมพ์ได้" });
+  }
+};
+
+export const closeAndGoDeliveryTruck = async (req, res) => {
+  let connection;
+  let transactionStarted = false;
+
+  try {
+    const truckLoadId = toNumberOrNull(req.params.truckLoadId);
+    const actorId = getActorId(req);
+    const warehouseId = getWarehouseId(req);
+
+    if (!truckLoadId || !actorId || !warehouseId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลใบรถกระจายไม่ถูกต้อง" });
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const now = new Date();
+
+    const [rows] = await connection.query(
+      `
+        SELECT
+          truck.id,
+          truck.is_close,
+          truck.is_go,
+          (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS serial_count
+        FROM tm_trucks truck
+        WHERE truck.id = ?
+          AND truck.status = 'DC_TRUCK'
+          AND truck.warehouse_id = ?
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [truckLoadId, warehouseId],
+    );
+    const truck = rows[0];
+
+    if (!truck) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(404).json({ success: false, message: "ไม่พบใบรถกระจาย" });
+    }
+
+    if (truck.is_close === "Y" && truck.is_go === "Y") {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ใบรถกระจายนี้ปิดบรรทุกและปล่อยรถแล้ว" });
+    }
+
+    if (Number(truck.serial_count || 0) <= 0) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ใบรถกระจายยังไม่มี Serial No" });
+    }
+
+    const truckCode = await createClosedDeliveryTruckCode(connection, now);
+
+    await connection.query(
+      `
+        UPDATE tm_trucks
+        SET
+          truck_code = ?,
+          close_by = COALESCE(close_by, ?),
+          close_datetime = COALESCE(close_datetime, ?),
+          go_by = COALESCE(go_by, ?),
+          go_datetime = COALESCE(go_datetime, ?),
+          is_close = 'Y',
+          is_go = 'Y'
+        WHERE id = ?
+      `,
+      [truckCode, actorId, now, actorId, now, truckLoadId],
+    );
+
+    await connection.query(
+      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      [truckLoadId],
+    );
+
+    if (truck.is_close !== "Y") {
+      await writeDeliveryTruckTransactions({
+        connection,
+        truckLoadId,
+        actorId,
+        statusId: 8,
+        statusMessage: "ปิดบรรทุก",
+        now,
+      });
+    }
+
+    if (truck.is_go !== "Y") {
+      await writeDeliveryTruckTransactions({
+        connection,
+        truckLoadId,
+        actorId,
+        statusId: 5,
+        statusMessage: "พัสดุออกจากศูนย์",
+        now,
+      });
+    }
+
+    await connection.commit();
+    transactionStarted = false;
+
+    return res.status(200).json({ success: true, message: "ปิดบรรทุกและปล่อยรถสำเร็จ" });
+  } catch (error) {
+    if (connection && transactionStarted) await connection.rollback();
+    console.error("closeAndGoDeliveryTruck error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถปิดบรรทุกและปล่อยรถได้" });
+  } finally {
+    connection?.release();
   }
 };
 

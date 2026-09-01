@@ -1,6 +1,7 @@
 import express from "express";
 
 import {
+  closeAndGoDeliveryTruck,
   createDeliveryTruck,
   deleteDeliveryTruck,
   getDeliveryTruckById,
@@ -22,6 +23,7 @@ router.get("/:truckLoadId/products", auth, getDeliveryTruckProducts);
 router.get("/:truckLoadId", auth, getDeliveryTruckById);
 router.post("/:truckLoadId/load-product", auth, loadDeliveryTruckProduct);
 router.post("/:truckLoadId/unload-product", auth, unloadDeliveryTruckProduct);
+router.patch("/:truckLoadId/close-and-go", auth, closeAndGoDeliveryTruck);
 router.patch("/:truckLoadId/delete", auth, deleteDeliveryTruck);
 router.post("/", auth, createDeliveryTruck);
 

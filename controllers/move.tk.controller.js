@@ -54,6 +54,7 @@ export const getMoveTkSourceTrucks = async (req, res) => {
         SELECT ${TRUCK_LIST_SELECT}
         ${TRUCK_LIST_JOINS}
         WHERE truck.is_close = 'Y'
+          AND truck.status = 'DC_TRUCK_DC'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
           AND truck.warehouse_id = ?
@@ -91,6 +92,7 @@ export const getMoveTkTargetTrucks = async (req, res) => {
           AND COALESCE(source_truck.is_deleted, 'N') = 'N'
           AND COALESCE(source_truck.is_arrived, 'N') <> 'Y'
           AND source_truck.warehouse_id = ?
+          AND source_truck.status = 'DC_TRUCK_DC'
         WHERE COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
           AND truck.id <> source_truck.id
@@ -309,7 +311,13 @@ export const moveTkProducts = async (req, res) => {
     const sourceTruck = truckRows.find((row) => Number(row.id) === sourceTruckLoadId);
     const targetTruck = truckRows.find((row) => Number(row.id) === targetTruckLoadId);
 
-    if (!sourceTruck || !targetTruck || sourceTruck.is_close !== "Y" || targetTruck.status !== "DC_TRUCK_DC") {
+    if (
+      !sourceTruck ||
+      !targetTruck ||
+      sourceTruck.is_close !== "Y" ||
+      sourceTruck.status !== "DC_TRUCK_DC" ||
+      targetTruck.status !== "DC_TRUCK_DC"
+    ) {
       await connection.rollback();
       transactionStarted = false;
       return res.status(400).json({ success: false, message: "ไม่พบใบต้นทาง/ปลายทาง หรือใบต้นทางยังไม่ปิดบรรทุก" });

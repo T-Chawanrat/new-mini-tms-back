@@ -1,4 +1,5 @@
 import db from "../config/db.js";
+import { randomUUID } from "node:crypto";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
 import { syncTruckBoxCount } from "../utils/truckUtils.js";
 
@@ -112,6 +113,7 @@ export const getMoveTkProducts = async (req, res) => {
     const truckLoadId = toNumberOrNull(req.params.truckLoadId);
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const includeOpen = req.query.include_open === "Y";
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
 
     if (!truckLoadId || !warehouseId) {
       return res.status(400).json({ success: false, message: "truck_load_id ไม่ถูกต้อง" });
@@ -161,7 +163,52 @@ export const getMoveTkProducts = async (req, res) => {
       [truckLoadId, warehouseId],
     );
 
-    return res.status(200).json({ success: true, data: rows });
+    const [draftRows] = actorId
+      ? await db.query(
+          `
+            SELECT
+              product_truck.id AS product_truck_id,
+              temp.serial_id,
+              temp.serial_no,
+              truck.driver_type,
+              COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
+              COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
+              COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
+              COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
+              destination.warehouse_name AS to_warehouse_name
+            FROM tmp_product_trucks temp
+            INNER JOIN tm_product_trucks product_truck
+              ON product_truck.id = temp.source_product_truck_id
+            INNER JOIN tm_trucks truck
+              ON truck.id = temp.truck_load_id
+            LEFT JOIN mm_vehicles vehicle
+              ON vehicle.id = truck.vehicle_id
+            LEFT JOIN mm_vehicles_contractor contractor_vehicle
+              ON contractor_vehicle.id = truck.vehicle_contractor_id
+            LEFT JOIN mm_province contractor_province
+              ON contractor_province.id = contractor_vehicle.license_plate_province_id
+            LEFT JOIN tm_product_warehouses product_warehouse
+              ON product_warehouse.id = (
+                SELECT MAX(latest_warehouse.id)
+                FROM tm_product_warehouses latest_warehouse
+                WHERE latest_warehouse.serial_id = temp.serial_id
+                  AND latest_warehouse.serial_no = temp.serial_no
+              )
+            LEFT JOIN tm_receive_serials receive_serial
+              ON receive_serial.serial_id = temp.serial_id
+              AND receive_serial.serial_no = temp.serial_no
+            LEFT JOIN mm_warehouses_to destination
+              ON destination.warehouse_id = COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id)
+            WHERE temp.action_type = 'MOVE_TK'
+              AND temp.created_by = ?
+              AND temp.source_truck_load_id = ?
+            ORDER BY temp.id ASC
+          `,
+          [actorId, truckLoadId],
+        )
+      : [[]];
+
+    return res.status(200).json({ success: true, data: rows, draft: draftRows });
   } catch (error) {
     console.error("getMoveTkProducts error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดสินค้าในใบปิดบรรทุกได้" });
@@ -173,11 +220,12 @@ export const moveTkProducts = async (req, res) => {
   let transactionStarted = false;
 
   try {
+    const action = String(req.body.action ?? "").trim().toUpperCase();
     const sourceTruckLoadId = toNumberOrNull(req.body.source_truck_load_id);
     const targetTruckLoadId = toNumberOrNull(req.body.target_truck_load_id);
     const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
-    const serialNos = Array.isArray(req.body.serial_nos)
+    let serialNos = Array.isArray(req.body.serial_nos)
       ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter(Boolean))]
       : [];
     const confirmedMismatchSerialNos = new Set(
@@ -186,7 +234,36 @@ export const moveTkProducts = async (req, res) => {
         : [],
     );
 
-    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId || !warehouseId) {
+    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !actorId || !warehouseId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลการย้ายใบปิดบรรทุกไม่ถูกต้อง" });
+    }
+
+    if (action === "REMOVE") {
+      const serialNo = cleanCode(req.body.serial_no);
+      if (!serialNo) {
+        return res.status(400).json({ success: false, message: "ข้อมูลรายการรอยืนยันไม่ถูกต้อง" });
+      }
+
+      const [result] = await db.query(
+        `
+          DELETE FROM tmp_product_trucks
+          WHERE action_type = 'MOVE_TK'
+            AND serial_no = ?
+            AND created_by = ?
+            AND source_truck_load_id = ?
+            AND truck_load_id = ?
+        `,
+        [serialNo, actorId, sourceTruckLoadId, targetTruckLoadId],
+      );
+
+      if (!result.affectedRows) {
+        return res.status(404).json({ success: false, message: "ไม่พบ Serial No ในรายการรอยืนยัน" });
+      }
+
+      return res.status(200).json({ success: true, message: "นำ SN กลับไปรายการต้นทางแล้ว" });
+    }
+
+    if (action !== "CONFIRM" && !serialNos.length) {
       return res.status(400).json({ success: false, message: "ข้อมูลการย้ายใบปิดบรรทุกไม่ถูกต้อง" });
     }
 
@@ -194,6 +271,28 @@ export const moveTkProducts = async (req, res) => {
     await connection.beginTransaction();
     transactionStarted = true;
     const now = new Date();
+
+    if (action === "CONFIRM") {
+      const [draftRows] = await connection.query(
+        `
+          SELECT serial_no
+          FROM tmp_product_trucks
+          WHERE action_type = 'MOVE_TK'
+            AND created_by = ?
+            AND source_truck_load_id = ?
+            AND truck_load_id = ?
+          FOR UPDATE
+        `,
+        [actorId, sourceTruckLoadId, targetTruckLoadId],
+      );
+      serialNos = [...new Set(draftRows.map((row) => cleanCode(row.serial_no)).filter(Boolean))];
+
+      if (!serialNos.length) {
+        await connection.rollback();
+        transactionStarted = false;
+        return res.status(400).json({ success: false, message: "ยังไม่มีรายการรอยืนยัน" });
+      }
+    }
 
     const [truckRows] = await connection.query(
       `
@@ -233,6 +332,7 @@ export const moveTkProducts = async (req, res) => {
       `
         SELECT
           product_truck.id,
+          product_truck.serial_id,
           product_truck.serial_no,
           COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id
         FROM tm_product_trucks product_truck
@@ -267,7 +367,7 @@ export const moveTkProducts = async (req, res) => {
       });
     }
 
-    const unconfirmedMismatches = productRows.filter(
+    const unconfirmedMismatches = action === "CONFIRM" ? [] : productRows.filter(
       (row) =>
         row.to_warehouse_id !== null &&
         targetTruck.to_warehouse_id !== null &&
@@ -285,6 +385,35 @@ export const moveTkProducts = async (req, res) => {
       });
     }
 
+    if (action === "DRAFT") {
+      const draftValues = productRows.map((row) => [
+        randomUUID(),
+        row.serial_id,
+        row.serial_no,
+        row.id,
+        sourceTruckLoadId,
+        targetTruckLoadId,
+        actorId,
+        now,
+      ]);
+      const valuePlaceholders = draftValues.map(() => "(?, 'MOVE_TK', ?, ?, ?, ?, ?, ?, ?)").join(", ");
+
+      await connection.query(
+        `
+          INSERT INTO tmp_product_trucks (
+            tmp_batch_id, action_type, serial_id, serial_no,
+            source_product_truck_id, source_truck_load_id, truck_load_id,
+            created_by, created_date
+          ) VALUES ${valuePlaceholders}
+        `,
+        draftValues.flat(),
+      );
+
+      await connection.commit();
+      transactionStarted = false;
+      return res.status(201).json({ success: true, message: "เพิ่มรายการรอยืนยันแล้ว", moved: productRows.length });
+    }
+
     const [result] = await connection.query(
       `
         UPDATE tm_product_trucks product_truck
@@ -294,7 +423,7 @@ export const moveTkProducts = async (req, res) => {
           product_truck.truck_load_id = target_truck.id,
           product_truck.user_truck_id = target_truck.user_truck_id,
           product_truck.driver_name = target_truck.driver_name,
-          product_truck.truck_id = target_truck.vehicle_id,
+          product_truck.truck_id = COALESCE(target_truck.vehicle_id, target_truck.vehicle_contractor_id),
           product_truck.status = CASE
             WHEN target_truck.is_go = 'Y' THEN 'DELIVERING'
             ELSE 'LOADED'
@@ -350,7 +479,7 @@ export const moveTkProducts = async (req, res) => {
               target_truck.driver_name
             )
           END,
-          target_truck.vehicle_id,
+          COALESCE(target_truck.vehicle_id, target_truck.vehicle_contractor_id),
           vehicle.license_plate,
           vehicle.license_plate_province_id,
           product_truck.status,
@@ -405,6 +534,19 @@ export const moveTkProducts = async (req, res) => {
             AND COALESCE(is_deleted, 'N') = 'N'
         `,
         [actorId, sourceTruckLoadId],
+      );
+    }
+
+    if (action === "CONFIRM") {
+      await connection.query(
+        `
+          DELETE FROM tmp_product_trucks
+          WHERE action_type = 'MOVE_TK'
+            AND created_by = ?
+            AND source_truck_load_id = ?
+            AND truck_load_id = ?
+        `,
+        [actorId, sourceTruckLoadId, targetTruckLoadId],
       );
     }
 

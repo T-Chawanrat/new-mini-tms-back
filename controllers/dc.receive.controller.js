@@ -1,10 +1,122 @@
 import db from "../config/db.js";
+import { randomUUID } from "node:crypto";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
 
 const cleanSerialNos = (value) =>
   Array.isArray(value)
     ? [...new Set(value.map((item) => cleanCode(item)).filter(Boolean))]
     : [];
+
+const createDcReceiveDraft = async ({ batchId, serialNo, warehouseId, actorId }) => {
+  const connection = await db.getConnection();
+  let transactionStarted = false;
+
+  try {
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const now = new Date();
+
+    const [productRows] = await connection.query(
+      `
+        SELECT
+          product_truck.id AS product_truck_id,
+          product_truck.truck_load_id,
+          product_truck.serial_id,
+          product_truck.serial_no,
+          product_truck.route_id,
+          truck.to_warehouse_id,
+          receive_serial.to_warehouse_id AS receive_to_warehouse_id,
+          receive_serial.route_id AS receive_route_id
+        FROM tm_product_trucks product_truck
+        INNER JOIN tm_trucks truck
+          ON truck.id = product_truck.truck_load_id
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_truck.serial_id
+          AND receive_serial.serial_no = product_truck.serial_no
+        WHERE product_truck.serial_no = ?
+          AND product_truck.status = 'DELIVERING'
+          AND truck.to_warehouse_id = ?
+          AND truck.is_close = 'Y'
+          AND truck.is_go = 'Y'
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+        FOR UPDATE
+      `,
+      [serialNo, warehouseId],
+    );
+
+    if (!productRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return { status: 400, message: "ไม่พบ Serial No ในรถซึ่งมาถึง DC นี้" };
+    }
+
+    const product = productRows[0];
+    const [warehouseRows] = await connection.query(
+      "SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE",
+      [product.serial_no],
+    );
+
+    if (warehouseRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return { status: 409, message: "Serial No นี้อยู่ในคลังแล้ว" };
+    }
+
+    await connection.query(
+      `
+        INSERT INTO tmp_product_warehouses (
+          tmp_batch_id, action_type, serial_id, serial_no,
+          source_product_truck_id, source_truck_load_id, source_warehouse_id,
+          now_warehouse_id, to_warehouse_id, route_id, created_by, created_date
+        ) VALUES (?, 'DC_RECEIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        batchId,
+        product.serial_id,
+        product.serial_no,
+        product.product_truck_id,
+        product.truck_load_id,
+        null,
+        warehouseId,
+        product.receive_to_warehouse_id ?? product.to_warehouse_id,
+        product.route_id ?? product.receive_route_id,
+        actorId,
+        now,
+      ],
+    );
+
+    await connection.commit();
+    transactionStarted = false;
+    return { status: 201, message: "เพิ่มรายการรอยืนยันแล้ว" };
+  } catch (error) {
+    if (transactionStarted) await connection.rollback();
+    if (error?.code === "ER_DUP_ENTRY") {
+      return { status: 409, message: "Serial No นี้อยู่ในรายการรอยืนยันแล้ว" };
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+const removeDcReceiveDraft = async ({ serialNo, warehouseId, actorId }) => {
+  const [result] = await db.query(
+    `
+      DELETE FROM tmp_product_warehouses
+      WHERE action_type = 'DC_RECEIVE'
+        AND serial_no = ?
+        AND created_by = ?
+        AND now_warehouse_id = ?
+    `,
+    [serialNo, actorId, warehouseId],
+  );
+
+  if (!result.affectedRows) {
+    return { status: 404, message: "ไม่พบ Serial No ในรายการรอยืนยัน" };
+  }
+
+  return { status: 200, message: "นำ SN กลับไปรายการรอยิงแล้ว" };
+};
 
 export const getDcReceiveSerials = async (req, res) => {
   try {
@@ -57,34 +169,37 @@ export const getDcReceiveSerials = async (req, res) => {
       [warehouseId, warehouseId],
     );
 
-    const [receivedRows] = actorId
+    const [draftRows] = actorId
       ? await db.query(
           `
             SELECT
-              log.serial_id,
-              log.serial_no,
-              log.created_date AS movement_date,
-              log.truck_load_id,
+              temp.serial_id,
+              temp.serial_no,
+              temp.created_date AS movement_date,
+              temp.source_truck_load_id AS truck_load_id,
               truck.truck_code,
-              log.driver_name,
-              log.truck_license_plate AS license_plate,
+              COALESCE(product_truck.driver_name, truck.driver_name) AS driver_name,
+              vehicle.license_plate,
               province.province_name AS license_province
-            FROM logs_product_trucks log
+            FROM tmp_product_warehouses temp
             LEFT JOIN tm_trucks truck
-              ON truck.id = log.truck_load_id
+              ON truck.id = temp.source_truck_load_id
+            LEFT JOIN tm_product_trucks product_truck
+              ON product_truck.id = temp.source_product_truck_id
+            LEFT JOIN mm_vehicles vehicle
+              ON vehicle.id = product_truck.truck_id
             LEFT JOIN mm_province province
-              ON province.id = log.license_plate_province_id
-            WHERE log.event_type = 'UNLOAD'
-              AND log.created_by = ?
-              AND log.truck_to_warehouse_id = ?
-              AND DATE(log.created_date) = CURDATE()
-            ORDER BY log.id DESC
+              ON province.id = vehicle.license_plate_province_id
+            WHERE temp.action_type = 'DC_RECEIVE'
+              AND temp.created_by = ?
+              AND temp.now_warehouse_id = ?
+            ORDER BY temp.id DESC
           `,
           [actorId, warehouseId],
         )
       : [[]];
 
-    return res.status(200).json({ success: true, total: rows.length, data: rows, received: receivedRows });
+    return res.status(200).json({ success: true, total: rows.length, data: rows, draft: draftRows });
   } catch (error) {
     console.error("getDcReceiveSerials error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการรอรับเข้า DC ได้" });
@@ -96,11 +211,36 @@ export const createDcReceive = async (req, res) => {
   let transactionStarted = false;
 
   try {
-    const serialNos = cleanSerialNos(req.body.serial_nos);
+    const action = String(req.body.action ?? "").trim().toUpperCase();
+    let serialNos = cleanSerialNos(req.body.serial_nos);
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
 
-    if (!serialNos.length || !warehouseId || !actorId) {
+    if (!warehouseId || !actorId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลรับสินค้าเข้า DC ไม่ถูกต้อง" });
+    }
+
+    if (action === "DRAFT") {
+      const serialNo = cleanCode(req.body.serial_no);
+      if (!serialNo) {
+        return res.status(400).json({ success: false, message: "ข้อมูลรายการรอยืนยันไม่ถูกต้อง" });
+      }
+
+      const result = await createDcReceiveDraft({ batchId: randomUUID(), serialNo, warehouseId, actorId });
+      return res.status(result.status).json({ success: result.status < 400, message: result.message });
+    }
+
+    if (action === "REMOVE") {
+      const serialNo = cleanCode(req.body.serial_no);
+      if (!serialNo) {
+        return res.status(400).json({ success: false, message: "ข้อมูลรายการรอยืนยันไม่ถูกต้อง" });
+      }
+
+      const result = await removeDcReceiveDraft({ serialNo, warehouseId, actorId });
+      return res.status(result.status).json({ success: result.status < 400, message: result.message });
+    }
+
+    if (action !== "CONFIRM" && !serialNos.length) {
       return res.status(400).json({ success: false, message: "ข้อมูลรับสินค้าเข้า DC ไม่ถูกต้อง" });
     }
 
@@ -108,6 +248,27 @@ export const createDcReceive = async (req, res) => {
     await connection.beginTransaction();
     transactionStarted = true;
     const now = new Date();
+
+    if (action === "CONFIRM") {
+      const [draftRows] = await connection.query(
+        `
+          SELECT serial_no
+          FROM tmp_product_warehouses
+          WHERE action_type = 'DC_RECEIVE'
+            AND created_by = ?
+            AND now_warehouse_id = ?
+          FOR UPDATE
+        `,
+        [actorId, warehouseId],
+      );
+      serialNos = [...new Set(draftRows.map((row) => cleanCode(row.serial_no)).filter(Boolean))];
+
+      if (!serialNos.length) {
+        await connection.rollback();
+        transactionStarted = false;
+        return res.status(400).json({ success: false, message: "ยังไม่มีรายการรอยืนยัน" });
+      }
+    }
 
     const placeholders = serialNos.map(() => "?").join(", ");
     const [productRows] = await connection.query(
@@ -152,6 +313,7 @@ export const createDcReceive = async (req, res) => {
           serial_no,
           now_warehouse_id,
           to_warehouse_id,
+          route_id,
           created_by,
           created_date
         )
@@ -160,6 +322,7 @@ export const createDcReceive = async (req, res) => {
           product_truck.serial_no,
           ?,
           COALESCE(receive_serial.to_warehouse_id, truck.to_warehouse_id),
+          COALESCE(product_truck.route_id, receive_serial.route_id),
           ?,
           ?
         FROM tm_product_trucks product_truck
@@ -356,6 +519,18 @@ export const createDcReceive = async (req, res) => {
             )
         `,
         [actorId, now, ...truckLoadIds, warehouseId],
+      );
+    }
+
+    if (action === "CONFIRM") {
+      await connection.query(
+        `
+          DELETE FROM tmp_product_warehouses
+          WHERE action_type = 'DC_RECEIVE'
+            AND created_by = ?
+            AND now_warehouse_id = ?
+        `,
+        [actorId, warehouseId],
       );
     }
 

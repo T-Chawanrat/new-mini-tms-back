@@ -1,6 +1,136 @@
 import db from "../config/db.js";
+import { randomUUID } from "node:crypto";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
 import { formatDateOnly } from "../utils/formatDate.js";
+
+const createWarehouseReceiveDraft = async (req, res) => {
+  let connection;
+
+  try {
+    const tmpBatchId = randomUUID();
+    const serialNo = cleanCode(req.body.serial_no);
+    const createdBy = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+    const resendDate = formatDateOnly(req.body.resend_date);
+
+    if (!serialNo || !createdBy || !warehouseId) {
+      return res.status(400).json({ message: "ข้อมูลรายการรอรับเข้าคลังไม่ถูกต้อง" });
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    const now = new Date();
+
+    const [sourceRows] = await connection.query(
+      `
+        SELECT
+          product_customer.serial_id,
+          product_customer.serial_no,
+          product_customer.to_warehouse_id,
+          receive_serial.route_id
+        FROM tm_product_customers product_customer
+        LEFT JOIN tm_receive_serials receive_serial
+          ON receive_serial.serial_id = product_customer.serial_id
+          AND receive_serial.serial_no = product_customer.serial_no
+        WHERE product_customer.serial_no = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [serialNo],
+    );
+
+    const source = sourceRows[0];
+    if (!source) {
+      await connection.rollback();
+      return res.status(404).json({ message: "ไม่พบ Serial No ในรายการรอรับเข้าคลัง" });
+    }
+
+    const [warehouseRows] = await connection.query(
+      "SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE",
+      [serialNo],
+    );
+
+    if (warehouseRows.length) {
+      await connection.rollback();
+      return res.status(409).json({ message: "Serial No นี้รับเข้าคลังแล้ว" });
+    }
+
+    await connection.query(
+      `
+        INSERT INTO tmp_product_warehouses (
+          tmp_batch_id,
+          action_type,
+          serial_id,
+          serial_no,
+          now_warehouse_id,
+          to_warehouse_id,
+          route_id,
+          resend_date,
+          created_by,
+          created_date
+        )
+        VALUES (?, 'WH_RECEIVE', ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        tmpBatchId,
+        source.serial_id,
+        source.serial_no,
+        warehouseId,
+        toNumberOrNull(source.to_warehouse_id),
+        toNumberOrNull(source.route_id),
+        resendDate,
+        createdBy,
+        now,
+      ],
+    );
+
+    await connection.commit();
+    return res.status(201).json({ message: "เพิ่ม SN ในรายการรอยืนยันแล้ว" });
+  } catch (error) {
+    if (connection) await connection.rollback();
+
+    if (error?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ message: "Serial No นี้อยู่ในรายการรอยืนยันแล้ว" });
+    }
+
+    console.error("createWarehouseReceiveDraft error:", error);
+    return res.status(500).json({ message: "ไม่สามารถเพิ่มรายการรอรับเข้าคลังได้" });
+  } finally {
+    connection?.release();
+  }
+};
+
+const removeWarehouseReceiveDraft = async (req, res) => {
+  try {
+    const serialNo = cleanCode(req.body.serial_no);
+    const createdBy = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+
+    if (!serialNo || !createdBy || !warehouseId) {
+      return res.status(400).json({ message: "ข้อมูลรายการรอยืนยันไม่ถูกต้อง" });
+    }
+
+    const [result] = await db.query(
+      `
+        DELETE FROM tmp_product_warehouses
+        WHERE action_type = 'WH_RECEIVE'
+          AND serial_no = ?
+          AND created_by = ?
+          AND now_warehouse_id = ?
+      `,
+      [serialNo, createdBy, warehouseId],
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: "ไม่พบ Serial No ในรายการรอยืนยัน" });
+    }
+
+    return res.json({ message: "นำ SN กลับไปรายการรอยิงแล้ว" });
+  } catch (error) {
+    console.error("removeWarehouseReceiveDraft error:", error);
+    return res.status(500).json({ message: "ไม่สามารถนำรายการกลับไปรายการรอยิงได้" });
+  }
+};
 
 export const getWarehouseReceiveSerials = async (req, res) => {
   try {
@@ -33,6 +163,11 @@ export const getWarehouseReceiveSerials = async (req, res) => {
         ON wt.warehouse_id = product_customer.to_warehouse_id
 
       WHERE NULLIF(TRIM(product_customer.serial_no), '') IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM tmp_product_warehouses temp_product
+          WHERE temp_product.serial_no = product_customer.serial_no
+        )
 
         ${where.length ? `AND ${where.join("\n        AND ")}` : ""}
 
@@ -43,31 +178,28 @@ export const getWarehouseReceiveSerials = async (req, res) => {
     `;
 
     const [rows] = await db.query(sql, params);
-    const [receivedRows] = actorId && warehouseId
+    const [draftRows] = actorId && warehouseId
       ? await db.query(
           `
             SELECT
-              product_warehouse.serial_no,
+              temp_product.serial_no,
               receive_serial.customer_id,
               customer.name AS customer_name,
-              product_warehouse.to_warehouse_id,
+              temp_product.to_warehouse_id,
               destination.warehouse_name AS to_warehouse_name
-            FROM logs_product_warehouses log
-            INNER JOIN tm_product_warehouses product_warehouse
-              ON product_warehouse.id = log.product_warehouse_id
+            FROM tmp_product_warehouses temp_product
             LEFT JOIN tm_receive_serials receive_serial
-              ON receive_serial.serial_id = product_warehouse.serial_id
-              AND receive_serial.serial_no = product_warehouse.serial_no
+              ON receive_serial.serial_id = temp_product.serial_id
+              AND receive_serial.serial_no = temp_product.serial_no
             LEFT JOIN mm_customers customer
               ON customer.id = receive_serial.customer_id
             LEFT JOIN mm_warehouses_to destination
-              ON destination.warehouse_id = product_warehouse.to_warehouse_id
-            WHERE log.event_type = 'RECEIVE_IN'
-              AND log.created_by = ?
-              AND log.now_warehouse_id = ?
-              AND DATE(log.created_date) = CURDATE()
+              ON destination.warehouse_id = temp_product.to_warehouse_id
+            WHERE temp_product.action_type = 'WH_RECEIVE'
+              AND temp_product.created_by = ?
+              AND temp_product.now_warehouse_id = ?
               ${customerId !== null ? "AND receive_serial.customer_id = ?" : ""}
-            ORDER BY log.id DESC
+            ORDER BY temp_product.id DESC
           `,
           customerId !== null ? [actorId, warehouseId, customerId] : [actorId, warehouseId],
         )
@@ -77,7 +209,7 @@ export const getWarehouseReceiveSerials = async (req, res) => {
       success: true,
       total: rows.length,
       data: rows,
-      received: receivedRows,
+      draft: draftRows,
     });
   } catch (error) {
     console.error("getWarehouseReceiveSerials error:", error);
@@ -94,11 +226,20 @@ export const createWarehouseReceive = async (req, res) => {
   let connection;
 
   try {
-    const serialNos = Array.isArray(req.body.serial_nos)
+    const action = String(req.body.action || "").trim();
+    let serialNos = Array.isArray(req.body.serial_nos)
       ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter((value) => value !== null))]
       : [];
 
-    if (!serialNos.length) {
+    if (action === "DRAFT") {
+      return createWarehouseReceiveDraft(req, res);
+    }
+
+    if (action === "REMOVE") {
+      return removeWarehouseReceiveDraft(req, res);
+    }
+
+    if (action !== "CONFIRM" && !serialNos.length) {
       return res.status(400).json({
         success: false,
         message: "กรุณาระบุ Serial No ที่ต้องการรับเข้าคลัง",
@@ -125,6 +266,28 @@ export const createWarehouseReceive = async (req, res) => {
 
     connection = await db.getConnection();
     await connection.beginTransaction();
+
+    if (action === "CONFIRM") {
+      const [draftRows] = await connection.query(
+        `
+          SELECT serial_no
+          FROM tmp_product_warehouses
+          WHERE action_type = 'WH_RECEIVE'
+            AND created_by = ?
+            AND now_warehouse_id = ?
+          ORDER BY id ASC
+          FOR UPDATE
+        `,
+        [createdBy, warehouseId],
+      );
+
+      serialNos = draftRows.map((row) => String(row.serial_no));
+      if (!serialNos.length) {
+        await connection.rollback();
+        return res.status(400).json({ message: "ยังไม่มีรายการรอยืนยัน" });
+      }
+    }
+
     const now = new Date();
     const dataYear = now.getFullYear();
     const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
@@ -327,6 +490,18 @@ export const createWarehouseReceive = async (req, res) => {
       `,
       serialNos,
     );
+
+    if (action === "CONFIRM") {
+      await connection.query(
+        `
+          DELETE FROM tmp_product_warehouses
+          WHERE action_type = 'WH_RECEIVE'
+            AND created_by = ?
+            AND now_warehouse_id = ?
+        `,
+        [createdBy, warehouseId],
+      );
+    }
 
     await connection.commit();
 

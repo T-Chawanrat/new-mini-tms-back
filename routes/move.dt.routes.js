@@ -1,18 +1,18 @@
 import express from "express";
 
 import {
-  getMoveTkProducts,
-  getMoveTkSourceTrucks,
-  getMoveTkTargetTrucks,
-  moveTkProducts,
-} from "../controllers/move.tk.controller.js";
+  getMoveDtProducts,
+  getMoveDtSourceTrucks,
+  getMoveDtTargetTrucks,
+  moveDtProducts,
+} from "../controllers/move.dt.controller.js";
 import { auth } from "../middlewares/auth.js";
 
 const router = express.Router();
 
-router.get("/source-trucks", auth, getMoveTkSourceTrucks);
-router.get("/target-trucks", auth, getMoveTkTargetTrucks);
-router.get("/:truckLoadId/products", auth, getMoveTkProducts);
-router.patch("/products", auth, moveTkProducts);
+router.get("/source-trucks", auth, getMoveDtSourceTrucks);
+router.get("/target-trucks", auth, getMoveDtTargetTrucks);
+router.get("/:truckLoadId/products", auth, getMoveDtProducts);
+router.patch("/products", auth, moveDtProducts);
 
 export default router;

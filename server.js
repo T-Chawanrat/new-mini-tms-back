@@ -23,7 +23,7 @@ import productTruckRoutes from "./routes/product.truck.route.js";
 import truckLoadRoutes from "./routes/truck.route.js";
 import dcReceiveRoutes from "./routes/dc.receive.routes.js";
 import moveTkRoutes from "./routes/move.tk.routes.js";
-import moveDcRoutes from "./routes/move.dc.route.js";
+import moveDtRoutes from "./routes/move.dt.routes.js";
 import contractorRoutes from "./routes/contractor.routes.js";
 import driverAuthRoute from "./routes/auth.driver.routes.js";
 import deliveryTruckRoutes from "./routes/delivery.truck.route.js";
@@ -64,7 +64,7 @@ app.use("/truck-loads", truckLoadRoutes);
 app.use("/delivery-trucks", deliveryTruckRoutes);
 app.use("/dc-receives", dcReceiveRoutes);
 app.use("/move-tk", moveTkRoutes);
-app.use("/move-dc", moveDcRoutes);
+app.use("/move-dt", moveDtRoutes);
 app.use("/contractors", contractorRoutes);
 app.use("/driver", driverAuthRoute);
 

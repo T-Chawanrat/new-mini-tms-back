@@ -402,7 +402,7 @@ export const createWarehouseReceive = async (req, res) => {
           pw.id,
           pw.serial_id,
           pw.serial_no,
-          'RECEIVE_IN',
+          'RECEIVE_WH',
           pw.now_warehouse_id,
           pw.to_warehouse_id,
           ?,

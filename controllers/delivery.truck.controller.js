@@ -649,6 +649,43 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
     }
 
     if (truck.is_go !== "Y") {
+      await connection.query(
+        `
+          INSERT INTO logs_product_trucks (
+            product_truck_id, serial_id, serial_no, event_type, created_by,
+            user_truck_id, driver_name, truck_id, truck_license_plate,
+            license_plate_province_id, status, truck_load_id, is_dc_mismatch,
+            parcel_to_warehouse_id, truck_to_warehouse_id, created_date
+          )
+          SELECT
+            product_truck.id,
+            product_truck.serial_id,
+            product_truck.serial_no,
+            'DISPATCH',
+            ?,
+            product_truck.user_truck_id,
+            COALESCE(product_truck.driver_name, truck.driver_name),
+            product_truck.truck_id,
+            COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+            COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
+            'DELIVERING',
+            product_truck.truck_load_id,
+            'N',
+            receive_serial.to_warehouse_id,
+            NULL,
+            ?
+          FROM tm_product_trucks product_truck
+          INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
+          LEFT JOIN mm_vehicles vehicle ON vehicle.id = product_truck.truck_id
+          LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
+          LEFT JOIN tm_receive_serials receive_serial
+            ON receive_serial.serial_id = product_truck.serial_id
+            AND receive_serial.serial_no = product_truck.serial_no
+          WHERE product_truck.truck_load_id = ?
+            AND product_truck.status = 'DELIVERING'
+        `,
+        [actorId, now, truckLoadId],
+      );
       await writeDeliveryTruckTransactions({
         connection,
         truckLoadId,
@@ -912,7 +949,7 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
           product_warehouse_id, serial_id, serial_no, event_type,
           now_warehouse_id, to_warehouse_id, created_by, created_date
         )
-        VALUES (?, ?, ?, 'RECEIVE_IN', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
       `,
       [warehouseResult.insertId, product.serial_id, product.serial_no, product.warehouse_id, product.to_warehouse_id, actorId, now],
     );
@@ -1029,7 +1066,7 @@ export const deleteDeliveryTruck = async (req, res) => {
             product_warehouse_id, serial_id, serial_no, event_type,
             now_warehouse_id, to_warehouse_id, created_by, created_date
           )
-          VALUES (?, ?, ?, 'RECEIVE_IN', ?, ?, ?, ?)
+          VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
         `,
         [warehouseResult.insertId, product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, actorId, now],
       );

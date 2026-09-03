@@ -908,6 +908,49 @@ export const closeAndGoTruckLoad = async (req, res) => {
       });
     }
     if (rows[0].is_go !== "Y") {
+      await connection.query(
+        `
+          INSERT INTO logs_product_trucks (
+            product_truck_id, serial_id, serial_no, event_type, created_by,
+            user_truck_id, driver_name, truck_id, truck_license_plate,
+            license_plate_province_id, status, truck_load_id, is_dc_mismatch,
+            parcel_to_warehouse_id, truck_to_warehouse_id, created_date
+          )
+          SELECT
+            product_truck.id,
+            product_truck.serial_id,
+            product_truck.serial_no,
+            'DISPATCH',
+            ?,
+            product_truck.user_truck_id,
+            COALESCE(product_truck.driver_name, truck.driver_name),
+            product_truck.truck_id,
+            COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+            COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
+            'DELIVERING',
+            product_truck.truck_load_id,
+            CASE
+              WHEN receive_serial.to_warehouse_id IS NOT NULL
+                AND truck.to_warehouse_id IS NOT NULL
+                AND receive_serial.to_warehouse_id <> truck.to_warehouse_id
+              THEN 'Y'
+              ELSE 'N'
+            END,
+            COALESCE(receive_serial.to_warehouse_id, truck.to_warehouse_id),
+            truck.to_warehouse_id,
+            ?
+          FROM tm_product_trucks product_truck
+          INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
+          LEFT JOIN mm_vehicles vehicle ON vehicle.id = product_truck.truck_id
+          LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
+          LEFT JOIN tm_receive_serials receive_serial
+            ON receive_serial.serial_id = product_truck.serial_id
+            AND receive_serial.serial_no = product_truck.serial_no
+          WHERE product_truck.truck_load_id = ?
+            AND product_truck.status = 'DELIVERING'
+        `,
+        [actorId, now, truckLoadId],
+      );
       await writeTruckTransactions({
         connection,
         truckLoadId,
@@ -1107,7 +1150,7 @@ export const unloadTruckProduct = async (req, res) => {
           created_by,
           created_date
         )
-        VALUES (?, ?, ?, 'RECEIVE_IN', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
       `,
       [
         restoredWarehouseResult.insertId,
@@ -1274,7 +1317,7 @@ export const deleteTruckLoad = async (req, res) => {
           product_warehouse.id,
           product_warehouse.serial_id,
           product_warehouse.serial_no,
-          'CANCEL_RETURN',
+          'RETURN_WH',
           product_warehouse.now_warehouse_id,
           product_warehouse.to_warehouse_id,
           ?,

@@ -13,6 +13,7 @@ import {
   getDriverUsers,
   getActiveVehicles,
   getProvinces,
+  getSendProblems,
 } from "../controllers/filter.controller.js";
 
 const router = express.Router();
@@ -29,5 +30,6 @@ router.get("/vehicle-types", getVehicleTypes);
 router.get("/payments", getReceivePayments);
 router.get("/delivery-types", getReceiveDeliveryTypes);
 router.get("/provinces", getProvinces);
+router.get("/send-problems", getSendProblems);
 
 export default router;

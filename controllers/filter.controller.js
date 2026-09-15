@@ -367,3 +367,21 @@ export const getProvinces = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+export const getSendProblems = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `
+        SELECT
+          reason_send_problem_id,
+          reason_send_problem_detail
+        FROM mm_reason_send_problems
+        ORDER BY reason_send_problem_detail ASC
+      `
+    );
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("GET REASON SEND PROBLEMS ERROR:", err);
+    return res.status(500).json({ message: err.message });
+  }
+};

@@ -45,10 +45,7 @@ const createWarehouseReceiveDraft = async (req, res) => {
       return res.status(404).json({ message: "ไม่พบ Serial No ในรายการรอรับเข้าคลัง" });
     }
 
-    const [warehouseRows] = await connection.query(
-      "SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE",
-      [serialNo],
-    );
+    const [warehouseRows] = await connection.query("SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE", [serialNo]);
 
     if (warehouseRows.length) {
       await connection.rollback();
@@ -178,9 +175,10 @@ export const getWarehouseReceiveSerials = async (req, res) => {
     `;
 
     const [rows] = await db.query(sql, params);
-    const [draftRows] = actorId && warehouseId
-      ? await db.query(
-          `
+    const [draftRows] =
+      actorId && warehouseId
+        ? await db.query(
+            `
             SELECT
               temp_product.serial_no,
               receive_serial.customer_id,
@@ -201,9 +199,9 @@ export const getWarehouseReceiveSerials = async (req, res) => {
               ${customerId !== null ? "AND receive_serial.customer_id = ?" : ""}
             ORDER BY temp_product.id DESC
           `,
-          customerId !== null ? [actorId, warehouseId, customerId] : [actorId, warehouseId],
-        )
-      : [[]];
+            customerId !== null ? [actorId, warehouseId, customerId] : [actorId, warehouseId],
+          )
+        : [[]];
 
     return res.status(200).json({
       success: true,
@@ -294,9 +292,6 @@ export const createWarehouseReceive = async (req, res) => {
 
     const placeholders = serialNos.map(() => "?").join(", ");
 
-    /*
-     * tm_product_customers เป็นรายการรอรับและมีข้อมูลที่ต้องใช้สำหรับย้ายเข้าคลังครบแล้ว
-     */
     const [serialRows] = await connection.query(
       `
         SELECT DISTINCT
@@ -327,9 +322,6 @@ export const createWarehouseReceive = async (req, res) => {
       });
     }
 
-    /*
-     * ตรวจสอบว่ารับเข้าคลังไปแล้วหรือยัง
-     */
     const [existingRows] = await connection.query(
       `
         SELECT DISTINCT
@@ -352,10 +344,6 @@ export const createWarehouseReceive = async (req, res) => {
       });
     }
 
-    /*
-     * now_warehouse_id = คลังปัจจุบันของผู้ใช้งาน
-     * to_warehouse_id  = คลังปลายทางจาก tm_product_customers
-     */
     const values = serialRows.map((row) => [
       row.serial_id,
       row.serial_no,

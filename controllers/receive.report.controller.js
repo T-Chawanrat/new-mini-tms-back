@@ -89,7 +89,7 @@ const buildReceiveReportWhere = (query, alias = "t") => {
     where.push(`
       EXISTS (
         SELECT 1
-        FROM tm_receive_serials sx
+        FROM vw_receive_report_serials sx
         WHERE sx.receive_business_id = ${alias}.receive_business_id
           AND sx.serial_no LIKE ?
           AND ${activeItemWhere("sx")}
@@ -119,7 +119,7 @@ export const getReceiveReport = async (req, res) => {
         SELECT
           t.receive_business_id,
           t.receive_code
-        FROM tm_receive_serials t
+        FROM vw_receive_report_serials t
         ${whereSql}
         GROUP BY
           t.receive_business_id,
@@ -131,6 +131,7 @@ export const getReceiveReport = async (req, res) => {
       SELECT
         t.receive_code,
         t.receive_business_id,
+        MIN(t.reference_no) AS reference_no,
 
         MIN(t.receive_date) AS receive_date,
         MIN(t.receive_walkin_id) AS receive_walkin_id,
@@ -141,6 +142,7 @@ export const getReceiveReport = async (req, res) => {
         MIN(t.customer_type) AS customer_type,
 
         MIN(t.from_warehouse_id) AS from_warehouse_id,
+        MIN(wf.warehouse_name) AS from_warehouse_name,
         MIN(t.to_warehouse_id) AS to_warehouse_id,
         MIN(wt.warehouse_name) AS to_warehouse_name,
 
@@ -176,11 +178,13 @@ export const getReceiveReport = async (req, res) => {
 
         MAX(t.last_modified) AS last_modified
 
-      FROM tm_receive_serials t
+      FROM vw_receive_report_serials t
       LEFT JOIN mm_customers c
         ON c.id = t.customer_id
       LEFT JOIN mm_warehouses_to wt
         ON wt.warehouse_id = t.to_warehouse_id
+      LEFT JOIN mm_warehouses_to wf
+        ON wf.warehouse_id = t.from_warehouse_id
       ${whereSql}
       GROUP BY
         t.receive_business_id,
@@ -206,6 +210,7 @@ export const getReceiveReport = async (req, res) => {
           SELECT
             t.receive_code,
             t.receive_business_id,
+            t.reference_no,
             t.receive_date,
             t.receive_walkin_id,
             t.delivery_date,
@@ -270,7 +275,7 @@ export const getReceiveReport = async (req, res) => {
             t.last_modified,
             t.customer_type
 
-          FROM tm_receive_serials t
+          FROM vw_receive_report_serials t
           LEFT JOIN mm_warehouses_to wt
             ON wt.warehouse_id = t.to_warehouse_id
           WHERE t.receive_business_id IN (${placeholders})
@@ -342,6 +347,7 @@ export const getReceiveReportSerials = async (req, res) => {
       SELECT
         t.receive_code,
         t.receive_business_id,
+        t.reference_no,
         t.receive_date,
         t.receive_walkin_id,
         t.delivery_date,
@@ -406,7 +412,7 @@ export const getReceiveReportSerials = async (req, res) => {
         t.last_modified,
         t.customer_type
 
-      FROM tm_receive_serials t
+      FROM vw_receive_report_serials t
       LEFT JOIN mm_warehouses_to wt
         ON wt.warehouse_id = t.to_warehouse_id
       WHERE t.receive_business_id = ?
@@ -446,7 +452,7 @@ export const getReceiveReportSummary = async (req, res) => {
         COALESCE(SUM(t.weight), 0) AS total_weight,
         COALESCE(SUM(t.q), 0) AS total_qty,
         COALESCE(SUM(t.vol), 0) AS total_vol
-      FROM tm_receive_serials t
+      FROM vw_receive_report_serials t
       ${whereSql}
     `;
 
@@ -463,7 +469,7 @@ export const getReceiveReportSummary = async (req, res) => {
         COALESCE(SUM(t.weight), 0) AS total_weight,
         COALESCE(SUM(t.q), 0) AS total_qty,
         COALESCE(SUM(t.vol), 0) AS total_vol
-      FROM tm_receive_serials t
+      FROM vw_receive_report_serials t
       ${whereSql}
       GROUP BY DATE(t.receive_date)
       ORDER BY DATE(t.receive_date) DESC

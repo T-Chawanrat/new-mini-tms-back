@@ -42,64 +42,36 @@ const TRUCK_LIST_JOINS = `
 
 export const getMoveDtSourceTrucks = async (req, res) => {
   try {
-    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
-
-    if (!warehouseId) {
-      return res.status(401).json({ success: false, message: "ไม่พบ Warehouse ที่เลือก" });
-    }
-
     const [rows] = await db.query(
       `
         SELECT ${TRUCK_LIST_SELECT}
         ${TRUCK_LIST_JOINS}
         WHERE truck.is_close = 'Y'
-          AND truck.status = 'DC_TRUCK'
+          AND truck.status = 'DC_TRUCK_DC'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
-          AND truck.warehouse_id = ?
         ORDER BY truck.create_date DESC, truck.id DESC
       `,
-      [warehouseId],
     );
 
     return res.status(200).json({ success: true, data: rows });
   } catch (error) {
     console.error("getMoveDtSourceTrucks error:", error);
-    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดใบรถกระจายต้นทางได้" });
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดใบรถขนย้ายต้นทางได้" });
   }
 };
 
 export const getMoveDtTargetTrucks = async (req, res) => {
   try {
-    const sourceTruckLoadId = toNumberOrNull(req.query.source_truck_load_id);
-    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
-
-    if (!warehouseId) {
-      return res.status(401).json({ success: false, message: "ไม่พบ Warehouse ที่เลือก" });
-    }
-
-    if (!sourceTruckLoadId) {
-      return res.status(200).json({ success: true, data: [] });
-    }
-
     const [rows] = await db.query(
       `
         SELECT ${TRUCK_LIST_SELECT}
         ${TRUCK_LIST_JOINS}
-        INNER JOIN tm_trucks source_truck
-          ON source_truck.id = ?
-          AND COALESCE(source_truck.is_deleted, 'N') = 'N'
-          AND COALESCE(source_truck.is_arrived, 'N') <> 'Y'
-          AND source_truck.warehouse_id = ?
-          AND source_truck.status = 'DC_TRUCK'
         WHERE COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
-          AND truck.id <> source_truck.id
-          AND truck.warehouse_id = source_truck.warehouse_id
           AND truck.status = 'DC_TRUCK'
         ORDER BY truck.create_date DESC, truck.id DESC
       `,
-      [sourceTruckLoadId, warehouseId],
     );
 
     return res.status(200).json({ success: true, data: rows });
@@ -112,9 +84,14 @@ export const getMoveDtTargetTrucks = async (req, res) => {
 export const getMoveDtProducts = async (req, res) => {
   try {
     const truckLoadId = toNumberOrNull(req.params.truckLoadId);
-    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+    const role = String(req.query.role || "").trim().toLowerCase();
+    const truckConditions = role === "source"
+      ? "truck.status = 'DC_TRUCK_DC' AND truck.is_close = 'Y'"
+      : role === "target"
+        ? "truck.status = 'DC_TRUCK'"
+        : null;
 
-    if (!truckLoadId || !warehouseId) {
+    if (!truckLoadId || !truckConditions) {
       return res.status(400).json({ success: false, message: "truck_load_id ไม่ถูกต้อง" });
     }
 
@@ -152,21 +129,19 @@ export const getMoveDtProducts = async (req, res) => {
         LEFT JOIN mm_warehouses_to destination
           ON destination.warehouse_id = COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id)
         WHERE product_truck.truck_load_id = ?
-          AND truck.status = 'DC_TRUCK'
-          AND truck.is_close = 'Y'
+          AND ${truckConditions}
           AND COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
-          AND truck.warehouse_id = ?
           AND product_truck.status IN ('LOADED', 'DELIVERING')
         ORDER BY product_truck.id ASC
       `,
-      [truckLoadId, warehouseId],
+      [truckLoadId],
     );
 
     return res.status(200).json({ success: true, data: rows });
   } catch (error) {
     console.error("getMoveDtProducts error:", error);
-    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดสินค้าในใบรถกระจายได้" });
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดสินค้าในใบรถได้" });
   }
 };
 
@@ -178,7 +153,6 @@ export const moveDtProducts = async (req, res) => {
     const sourceTruckLoadId = toNumberOrNull(req.body.source_truck_load_id);
     const targetTruckLoadId = toNumberOrNull(req.body.target_truck_load_id);
     const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
-    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
     const serialNos = Array.isArray(req.body.serial_nos)
       ? [...new Set(req.body.serial_nos.map((value) => cleanCode(value)).filter(Boolean))]
       : [];
@@ -188,7 +162,7 @@ export const moveDtProducts = async (req, res) => {
         : [],
     );
 
-    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId || !warehouseId) {
+    if (!sourceTruckLoadId || !targetTruckLoadId || sourceTruckLoadId === targetTruckLoadId || !serialNos.length || !actorId) {
       return res.status(400).json({ success: false, message: "ข้อมูลการย้ายใบรถกระจายไม่ถูกต้อง" });
     }
 
@@ -212,22 +186,16 @@ export const moveDtProducts = async (req, res) => {
     const sourceTruck = truckRows.find((row) => Number(row.id) === sourceTruckLoadId);
     const targetTruck = truckRows.find((row) => Number(row.id) === targetTruckLoadId);
 
-    if (!sourceTruck || !targetTruck || sourceTruck.is_close !== "Y" || sourceTruck.status !== "DC_TRUCK" || targetTruck.status !== "DC_TRUCK") {
+    if (
+      !sourceTruck ||
+      !targetTruck ||
+      sourceTruck.is_close !== "Y" ||
+      sourceTruck.status !== "DC_TRUCK_DC" ||
+      targetTruck.status !== "DC_TRUCK"
+    ) {
       await connection.rollback();
       transactionStarted = false;
-      return res.status(400).json({ success: false, message: "ไม่พบใบรถกระจายต้นทาง/ปลายทาง หรือใบต้นทางยังไม่ปิดบรรทุก" });
-    }
-
-    if (Number(sourceTruck.warehouse_id) !== Number(targetTruck.warehouse_id)) {
-      await connection.rollback();
-      transactionStarted = false;
-      return res.status(400).json({ success: false, message: "ใบปลายทางต้องอยู่ DC ต้นทางเดียวกับใบต้นทาง" });
-    }
-
-    if (Number(sourceTruck.warehouse_id) !== warehouseId) {
-      await connection.rollback();
-      transactionStarted = false;
-      return res.status(403).json({ success: false, message: "คุณไม่มีสิทธิ์ย้ายสินค้าใน DC นี้" });
+      return res.status(400).json({ success: false, message: "ไม่พบใบรถขนย้ายต้นทาง/ใบรถกระจายปลายทาง หรือใบต้นทางยังไม่ปิดบรรทุก" });
     }
 
     const placeholders = serialNos.map(() => "?").join(", ");
@@ -390,36 +358,13 @@ export const moveDtProducts = async (req, res) => {
     await syncTruckBoxCount(connection, sourceTruckLoadId);
     await syncTruckBoxCount(connection, targetTruckLoadId);
 
-    const [sourceCountRows] = await connection.query(
-      `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,
-      [sourceTruckLoadId],
-    );
-    const sourceIsEmpty = Number(sourceCountRows[0]?.count_box || 0) === 0;
-
-    if (sourceIsEmpty) {
-      await connection.query(
-        `
-          UPDATE tm_trucks
-          SET
-            is_deleted = 'Y',
-            deleted_by = ?
-          WHERE id = ?
-            AND COALESCE(is_deleted, 'N') = 'N'
-        `,
-        [actorId, sourceTruckLoadId],
-      );
-    }
-
     await connection.commit();
     transactionStarted = false;
 
     return res.status(200).json({
       success: true,
-      message: sourceIsEmpty
-        ? "ย้ายสินค้าสำเร็จ และลบใบรถกระจายต้นทางที่ไม่มีสินค้าแล้ว"
-        : "ย้ายสินค้าไปยังใบรถกระจายใหม่สำเร็จ",
+      message: "ย้ายสินค้าไปยังใบรถกระจายสำเร็จ",
       moved: result.affectedRows,
-      source_deleted: sourceIsEmpty,
     });
   } catch (error) {
     if (connection && transactionStarted) await connection.rollback();

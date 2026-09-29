@@ -437,6 +437,86 @@ export const getReceiveReportSerials = async (req, res) => {
   }
 };
 
+export const getReceiveReportPrint = async (req, res) => {
+  try {
+    const receiveBusinessId = toNumberOrNull(req.params.receiveBusinessId);
+
+    if (!receiveBusinessId) {
+      return res.status(400).json({ success: false, message: "receiveBusinessId ไม่ถูกต้อง" });
+    }
+
+    const headerSql = `
+      SELECT
+        t.receive_business_id,
+        MIN(t.receive_code) AS receive_code,
+        MIN(t.reference_no) AS reference_no,
+        MIN(t.receive_date) AS receive_date,
+        MIN(t.delivery_date) AS delivery_date,
+        MIN(c.name) AS customer_name,
+        MIN(t.shipper_name) AS shipper_name,
+        MIN(t.recipient_name) AS recipient_name,
+        MIN(t.address) AS address,
+        MIN(t.subdistrict_name) AS subdistrict_name,
+        MIN(t.district_name) AS district_name,
+        MIN(t.province_name) AS province_name,
+        MIN(t.zip_code) AS zip_code,
+        MIN(t.tel) AS tel,
+        MIN(wf.warehouse_name) AS from_warehouse_name,
+        MIN(wt.warehouse_name) AS to_warehouse_name,
+        MIN(t.payment_type_id) AS payment_type_id,
+        MIN(t.remark) AS remark,
+        COUNT(DISTINCT t.serial_no) AS total_serial,
+        COALESCE(SUM(t.q), 0) AS total_qty,
+        COALESCE(SUM(t.cost), 0) AS total_cost,
+        COALESCE(SUM(t.cod), 0) AS total_cod
+      FROM vw_receive_report_serials t
+      LEFT JOIN mm_customers c
+        ON c.id = t.customer_id
+      LEFT JOIN mm_warehouses_to wf
+        ON wf.warehouse_id = t.from_warehouse_id
+      LEFT JOIN mm_warehouses_to wt
+        ON wt.warehouse_id = t.to_warehouse_id
+      WHERE t.receive_business_id = ?
+        AND ${activeItemWhere("t")}
+      GROUP BY t.receive_business_id
+    `;
+
+    const itemSql = `
+      SELECT
+        t.serial_id,
+        t.serial_no,
+        t.package_id,
+        t.package_name,
+        t.package_detail_id,
+        t.package_detail_name,
+        t.cost,
+        t.cod,
+        t.q,
+        t.weight,
+        t.width,
+        t.length,
+        t.height,
+        t.vol,
+        t.size_type
+      FROM vw_receive_report_serials t
+      WHERE t.receive_business_id = ?
+        AND ${activeItemWhere("t")}
+      ORDER BY t.serial_no ASC
+    `;
+
+    const [[header], [items]] = await Promise.all([db.query(headerSql, [receiveBusinessId]), db.query(itemSql, [receiveBusinessId])]);
+
+    if (!header?.[0]) {
+      return res.status(404).json({ success: false, message: "ไม่พบข้อมูลบิล" });
+    }
+
+    return res.json({ success: true, data: { header: header[0], items } });
+  } catch (error) {
+    console.error("getReceiveReportPrint error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดข้อมูลบิลส่งของได้" });
+  }
+};
+
 export const getReceiveReportSummary = async (req, res) => {
   try {
     const { whereSql, params } = buildReceiveReportWhere(req.query, "t");

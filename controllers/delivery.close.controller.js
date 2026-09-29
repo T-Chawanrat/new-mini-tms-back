@@ -72,11 +72,7 @@ export const getDeliveryCompletes = async (req, res) => {
     const limit = getPositiveInteger(req.query.limit, 50, 100);
     const search = cleanDbText(req.query.search)?.slice(0, 200) || null;
 
-    const whereParts = [
-      "receive.truck_status = 'DC_TRUCK'",
-      "receive.is_close = 'Y'",
-      "receive.is_go = 'Y'",
-    ];
+    const whereParts = [];
     const whereParams = [];
 
     if (search) {
@@ -101,6 +97,9 @@ export const getDeliveryCompletes = async (req, res) => {
         FROM (
           SELECT receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
           FROM vw_delivery_receive_serials receive
+          INNER JOIN tm_product_actived product_actived
+            ON product_actived.serial_id = receive.serial_id
+            AND product_actived.serial_no = receive.serial_no
           ${whereSql}
           GROUP BY receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
         ) bills
@@ -129,6 +128,9 @@ export const getDeliveryCompletes = async (req, res) => {
           MAX(receive.go_datetime) AS go_datetime,
           MAX(receive.close_datetime) AS close_datetime
         FROM vw_delivery_receive_serials receive
+        INNER JOIN tm_product_actived product_actived
+          ON product_actived.serial_id = receive.serial_id
+          AND product_actived.serial_no = receive.serial_no
         ${whereSql}
         GROUP BY receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
         ORDER BY MIN(receive.receive_date) DESC, receive.receive_code DESC
@@ -169,6 +171,9 @@ export const getDeliveryCompletes = async (req, res) => {
           delivery_status.next_delivery_date,
           delivery_status.delivered_datetime
         FROM vw_delivery_receive_serials receive
+        INNER JOIN tm_product_actived product_actived
+          ON product_actived.serial_id = receive.serial_id
+          AND product_actived.serial_no = receive.serial_no
         LEFT JOIN tm_delivery_statuses delivery_status
           ON delivery_status.delivery_status_id = (
             SELECT latest_status.delivery_status_id
@@ -178,9 +183,6 @@ export const getDeliveryCompletes = async (req, res) => {
             LIMIT 1
           )
         WHERE (${billCondition})
-          AND receive.truck_status = 'DC_TRUCK'
-          AND receive.is_close = 'Y'
-          AND receive.is_go = 'Y'
         ORDER BY receive.receive_code, receive.serial_no
       `,
       billParams,
@@ -419,7 +421,7 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       for (const mediaField of MEDIA_FIELDS) {
         for (const file of getUploadedFiles(req, mediaField.field)) {
           const relativeDirectory = path.posix.join(
-            "delivery-completes",
+            "delivery-closes",
             String(truckLoadId),
             String(statusRow.delivery_status_id),
             mediaField.folder,

@@ -448,60 +448,55 @@ export const getReceiveReportPrint = async (req, res) => {
     const headerSql = `
       SELECT
         t.receive_business_id,
-        MIN(t.receive_code) AS receive_code,
-        MIN(t.reference_no) AS reference_no,
-        MIN(t.receive_date) AS receive_date,
-        MIN(t.delivery_date) AS delivery_date,
-        MIN(c.name) AS customer_name,
-        MIN(t.shipper_name) AS shipper_name,
-        MIN(t.recipient_name) AS recipient_name,
-        MIN(t.address) AS address,
-        MIN(t.subdistrict_name) AS subdistrict_name,
-        MIN(t.district_name) AS district_name,
-        MIN(t.province_name) AS province_name,
-        MIN(t.zip_code) AS zip_code,
-        MIN(t.tel) AS tel,
-        MIN(wf.warehouse_name) AS from_warehouse_name,
-        MIN(wt.warehouse_name) AS to_warehouse_name,
-        MIN(t.payment_type_id) AS payment_type_id,
-        MIN(t.remark) AS remark,
-        COUNT(DISTINCT t.serial_no) AS total_serial,
-        COALESCE(SUM(t.q), 0) AS total_qty,
-        COALESCE(SUM(t.cost), 0) AS total_cost,
-        COALESCE(SUM(t.cod), 0) AS total_cod
-      FROM vw_receive_report_serials t
-      LEFT JOIN mm_customers c
-        ON c.id = t.customer_id
-      LEFT JOIN mm_warehouses_to wf
-        ON wf.warehouse_id = t.from_warehouse_id
-      LEFT JOIN mm_warehouses_to wt
-        ON wt.warehouse_id = t.to_warehouse_id
+        MAX(t.receive_code) AS receive_code,
+        MAX(t.reference_no) AS reference_no,
+        MAX(t.receive_date) AS receive_date,
+        MAX(t.delivery_date) AS delivery_date,
+        MAX(t.customer_name) AS customer_name,
+        MAX(t.shipper_name) AS shipper_name,
+        MAX(t.shipper_address) AS shipper_address,
+        MAX(t.shipper_subdistrict_name) AS shipper_subdistrict_name,
+        MAX(t.shipper_district_name) AS shipper_district_name,
+        MAX(t.shipper_province_name) AS shipper_province_name,
+        MAX(t.shipper_zip_code) AS shipper_zip_code,
+        MAX(t.shipper_tel) AS shipper_tel,
+        MAX(t.recipient_name) AS recipient_name,
+        MAX(t.address) AS address,
+        MAX(t.subdistrict_name) AS subdistrict_name,
+        MAX(t.district_name) AS district_name,
+        MAX(t.province_name) AS province_name,
+        MAX(t.zip_code) AS zip_code,
+        MAX(t.tel) AS tel,
+        MAX(t.from_warehouse_name) AS from_warehouse_name,
+        MAX(t.to_warehouse_name) AS to_warehouse_name,
+        MAX(t.payment_type_id) AS payment_type_id,
+        MAX(t.payment_type_name) AS payment_type_name,
+        MAX(t.remark) AS remark,
+        COALESCE(SUM(t.package_qty), 0) AS total_serial,
+        COALESCE(SUM(t.package_qty), 0) AS total_qty,
+        COALESCE(SUM(t.line_total_cost), 0) AS total_cost,
+        COALESCE(SUM(t.line_total_cod), 0) AS total_cod
+      FROM vw_receive_report_print t
       WHERE t.receive_business_id = ?
-        AND ${activeItemWhere("t")}
       GROUP BY t.receive_business_id
     `;
 
     const itemSql = `
       SELECT
-        t.serial_id,
-        t.serial_no,
         t.package_id,
         t.package_name,
         t.package_detail_id,
         t.package_detail_name,
-        t.cost,
-        t.cod,
-        t.q,
-        t.weight,
-        t.width,
-        t.length,
-        t.height,
-        t.vol,
-        t.size_type
-      FROM vw_receive_report_serials t
+        t.package_qty,
+        t.package_qty AS qty,
+        t.unit_cost,
+        t.unit_cost AS cost,
+        t.line_total_cost,
+        t.line_total_cod,
+        t.line_total_weight
+      FROM vw_receive_report_print t
       WHERE t.receive_business_id = ?
-        AND ${activeItemWhere("t")}
-      ORDER BY t.serial_no ASC
+      ORDER BY t.package_name ASC, t.package_detail_name ASC, t.unit_cost ASC
     `;
 
     const [[header], [items]] = await Promise.all([db.query(headerSql, [receiveBusinessId]), db.query(itemSql, [receiveBusinessId])]);

@@ -690,8 +690,8 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
         connection,
         truckLoadId,
         actorId,
-        statusId: 5,
-        statusMessage: "พัสดุออกจากศูนย์",
+        statusId: 9,
+        statusMessage: "กำลังนำจ่ายพัสดุ",
         now,
       });
     }

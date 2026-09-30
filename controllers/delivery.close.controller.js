@@ -6,44 +6,7 @@ import { fileURLToPath } from "url";
 import { cleanDbText, toNumberOrNull } from "../utils/cleanText.js";
 import { getPositiveInteger } from "../utils/pagination.js";
 
-const getWarehouseId = (req) => toNumberOrNull(req.user?.warehouse_id);
-const getActorId = (req) => toNumberOrNull(req.user?.id ?? req.user?.user_id);
 const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads");
-
-const DELIVERY_STATUS_VALUES = new Set([
-  "COMPLETED",
-  "POSTPONED",
-  "RETURN_TO_SHIPPER",
-]);
-
-const MEDIA_FIELDS = [
-  { field: "proof_images", mediaType: "PROOF_IMAGE", folder: "proof" },
-  { field: "sign_images", mediaType: "SIGNATURE_IMAGE", folder: "sign" },
-  { field: "reschedule_images", mediaType: "POSTPONE_IMAGE", folder: "reschedule" },
-  { field: "return_images", mediaType: "RETURN_IMAGE", folder: "return" },
-];
-
-const getSerialNos = (value) => {
-  const values = Array.isArray(value) ? value : (() => {
-    try {
-      return JSON.parse(String(value || "[]"));
-    } catch {
-      return [];
-    }
-  })();
-
-  if (!Array.isArray(values)) return [];
-
-  return [...new Set(values.map((serialNo) => String(serialNo || "").trim()).filter(Boolean))].slice(0, 1000);
-};
-
-const getImageExtension = (file) => {
-  const extension = path.extname(file.originalname || "").toLowerCase();
-  if ([".jpg", ".jpeg", ".png", ".webp"].includes(extension)) return extension;
-  return file.mimetype === "image/png" ? ".png" : file.mimetype === "image/webp" ? ".webp" : ".jpg";
-};
-
-const getUploadedFiles = (req, field) => (Array.isArray(req.files?.[field]) ? req.files[field] : []);
 
 const uniqueMedia = (media) => {
   const paths = new Set();
@@ -54,7 +17,7 @@ const uniqueMedia = (media) => {
   });
 };
 
-const getTruckStatus = (items) => {
+const getBillStatus = (items) => {
   if (!items.length) return "PENDING_CLOSE";
 
   const statuses = items.map((item) => item.delivery_status || "PENDING_CLOSE");
@@ -66,77 +29,78 @@ const getTruckStatus = (items) => {
   return "PENDING_CLOSE";
 };
 
+const receiveReferenceJoin = `
+  LEFT JOIN (
+    SELECT receive_id, GROUP_CONCAT(DISTINCT reference_no ORDER BY reference_no ASC SEPARATOR ', ') AS reference_no
+    FROM tm_receive_references
+    WHERE reference_no IS NOT NULL AND TRIM(reference_no) <> ''
+    GROUP BY receive_id
+  ) ref
+    ON ref.receive_id = COALESCE(rs.receive_business_id, rs.receive_walkin_id)
+`;
+
+const currentReceiveSerialSql = `
+  (
+    rs.item_is_deleted IS NULL
+    OR rs.item_is_deleted = ''
+    OR rs.item_is_deleted = '0'
+    OR LOWER(rs.item_is_deleted) IN ('false', 'n', 'no')
+  )
+`;
+
 export const getDeliveryCompletes = async (req, res) => {
   try {
     const page = getPositiveInteger(req.query.page, 1, Number.MAX_SAFE_INTEGER);
     const limit = getPositiveInteger(req.query.limit, 50, 100);
     const search = cleanDbText(req.query.search)?.slice(0, 200) || null;
-
-    const whereParts = [];
-    const whereParams = [];
-
-    if (search) {
-      const searchValue = `%${search}%`;
-      whereParts.push(`(
-        receive.receive_code LIKE ?
-        OR COALESCE(receive.reference_no, '') LIKE ?
-        OR receive.serial_no LIKE ?
-        OR COALESCE(receive.recipient_name, '') LIKE ?
-        OR COALESCE(receive.route_code, '') LIKE ?
-        OR COALESCE(receive.route_name, '') LIKE ?
-      )`);
-      whereParams.push(...Array(6).fill(searchValue));
-    }
-
-    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const requestedSearchType = cleanDbText(req.query.search_type);
+    const searchFieldByType = {
+      receive_code: "rs.receive_code",
+      serial_no: "rs.serial_no",
+      reference_no: "COALESCE(ref.reference_no, '')",
+    };
+    const selectedSearchField = searchFieldByType[requestedSearchType];
+    const searchSql = search
+      ? `${selectedSearchField || "rs.receive_code"} LIKE ?`
+      : "1 = 1";
+    const searchParams = search ? [`%${search}%`] : [];
+    const billIsRelevantSql = `(
+      EXISTS (SELECT 1 FROM tm_product_actived active WHERE active.serial_id = rs.serial_id)
+      OR EXISTS (SELECT 1 FROM tm_delivery_statuses status WHERE status.serial_id = rs.serial_id)
+    )`;
     const offset = (page - 1) * limit;
 
     const [[countRow]] = await db.query(
       `
         SELECT COUNT(*) AS total_items
         FROM (
-          SELECT receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
-          FROM vw_delivery_receive_serials receive
-          INNER JOIN tm_product_actived product_actived
-            ON product_actived.serial_id = receive.serial_id
-            AND product_actived.serial_no = receive.serial_no
-          ${whereSql}
-          GROUP BY receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
+          SELECT rs.receive_business_id, rs.receive_walkin_id, rs.receive_code
+          FROM tm_receive_serials rs
+          ${receiveReferenceJoin}
+          WHERE ${currentReceiveSerialSql} AND ${billIsRelevantSql} AND ${searchSql}
+          GROUP BY rs.receive_business_id, rs.receive_walkin_id, rs.receive_code
         ) bills
       `,
-      whereParams,
+      searchParams,
     );
 
     const [billRows] = await db.query(
       `
         SELECT
-          receive.receive_business_id,
-          receive.receive_walkin_id,
-          receive.receive_code,
-          MIN(receive.reference_no) AS reference_no,
-          MIN(receive.delivery_date) AS delivery_date,
-          MIN(receive.route_id) AS route_id,
-          MIN(receive.route_code) AS route_code,
-          MIN(receive.route_name) AS route_name,
-          MAX(receive.truck_load_id) AS truck_load_id,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.truck_code, '') ORDER BY receive.truck_code SEPARATOR ', ') AS truck_code,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.driver_name, '') ORDER BY receive.driver_name SEPARATOR ', ') AS driver_name,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.license_plate, '') ORDER BY receive.license_plate SEPARATOR ', ') AS license_plate,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.license_plate_province, '') ORDER BY receive.license_plate_province SEPARATOR ', ') AS license_plate_province,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.truck_route_code, '') ORDER BY receive.truck_route_code SEPARATOR ', ') AS truck_route_code,
-          GROUP_CONCAT(DISTINCT NULLIF(receive.truck_route_name, '') ORDER BY receive.truck_route_name SEPARATOR ', ') AS truck_route_name,
-          MAX(receive.go_datetime) AS go_datetime,
-          MAX(receive.close_datetime) AS close_datetime
-        FROM vw_delivery_receive_serials receive
-        INNER JOIN tm_product_actived product_actived
-          ON product_actived.serial_id = receive.serial_id
-          AND product_actived.serial_no = receive.serial_no
-        ${whereSql}
-        GROUP BY receive.receive_business_id, receive.receive_walkin_id, receive.receive_code
-        ORDER BY MIN(receive.receive_date) DESC, receive.receive_code DESC
+          rs.receive_business_id,
+          rs.receive_walkin_id,
+          rs.receive_code,
+          MAX(ref.reference_no) AS reference_no,
+          MIN(rs.delivery_date) AS delivery_date,
+          MIN(rs.route_id) AS route_id
+        FROM tm_receive_serials rs
+        ${receiveReferenceJoin}
+        WHERE ${currentReceiveSerialSql} AND ${billIsRelevantSql} AND ${searchSql}
+        GROUP BY rs.receive_business_id, rs.receive_walkin_id, rs.receive_code
+        ORDER BY MIN(rs.receive_date) DESC, rs.receive_code DESC
         LIMIT ? OFFSET ?
       `,
-      [...whereParams, limit, offset],
+      [...searchParams, limit, offset],
     );
 
     if (!billRows.length) {
@@ -148,42 +112,25 @@ export const getDeliveryCompletes = async (req, res) => {
     }
 
     const billCondition = billRows
-      .map(() => "(receive.receive_business_id <=> ? AND receive.receive_walkin_id <=> ? AND receive.receive_code = ?)")
+      .map(() => "(rs.receive_business_id <=> ? AND rs.receive_walkin_id <=> ? AND rs.receive_code = ?)")
       .join(" OR ");
     const billParams = billRows.flatMap((bill) => [bill.receive_business_id, bill.receive_walkin_id, bill.receive_code]);
     const [itemRows] = await db.query(
       `
         SELECT
-          receive.receive_business_id,
-          receive.receive_walkin_id,
-          receive.receive_code,
-          receive.reference_no,
-          receive.serial_id,
-          receive.serial_no,
-          receive.recipient_name,
-          receive.recipient_detail_name,
-          receive.full_address,
-          receive.cod,
+          rs.receive_business_id,
+          rs.receive_walkin_id,
+          rs.receive_code,
+          rs.serial_id,
+          rs.serial_no,
           delivery_status.delivery_status_id,
           COALESCE(delivery_status.delivery_status, 'PENDING_CLOSE') AS delivery_status,
           delivery_status.status_note,
-          delivery_status.issue_type,
-          delivery_status.next_delivery_date,
           delivery_status.delivered_datetime
-        FROM vw_delivery_receive_serials receive
-        INNER JOIN tm_product_actived product_actived
-          ON product_actived.serial_id = receive.serial_id
-          AND product_actived.serial_no = receive.serial_no
-        LEFT JOIN tm_delivery_statuses delivery_status
-          ON delivery_status.delivery_status_id = (
-            SELECT latest_status.delivery_status_id
-            FROM tm_delivery_statuses latest_status
-            WHERE latest_status.serial_id = receive.serial_id
-            ORDER BY COALESCE(latest_status.updated_date, latest_status.created_date) DESC, latest_status.delivery_status_id DESC
-            LIMIT 1
-          )
-        WHERE (${billCondition})
-        ORDER BY receive.receive_code, receive.serial_no
+        FROM tm_receive_serials rs
+        LEFT JOIN tm_delivery_statuses delivery_status ON delivery_status.serial_id = rs.serial_id
+        WHERE ${currentReceiveSerialSql} AND (${billCondition})
+        ORDER BY rs.receive_code, rs.serial_no
       `,
       billParams,
     );
@@ -232,28 +179,28 @@ export const getDeliveryCompletes = async (req, res) => {
         id: billKey,
         receive_business_id: bill.receive_business_id,
         receive_walkin_id: bill.receive_walkin_id,
-        truck_load_id: bill.truck_load_id,
-        truck_code: bill.truck_code || "-",
+        truck_code: "-",
         route_id: bill.route_id,
-        route_code: bill.truck_route_code || bill.route_code || "-",
-        route_name: bill.truck_route_name || bill.route_name || "-",
-        driver_name: bill.driver_name || "-",
+        route_code: "-",
+        route_name: "-",
+        driver_name: "-",
         operator_name: "-",
-        license_plate: bill.license_plate || "-",
-        license_plate_province: bill.license_plate_province || "-",
-        departure_at: bill.go_datetime || bill.close_datetime || bill.delivery_date,
+        license_plate: "-",
+        license_plate_province: "-",
+        departure_at: bill.delivery_date,
         bill_no: bill.receive_code,
         reference_no: bill.reference_no || "-",
+        serial_items: items.map((item) => ({ serial_id: item.serial_id, serial_no: item.serial_no, delivery_status: item.delivery_status })),
         serial_numbers: items.map((item) => item.serial_no),
         delivered_serial_numbers: deliveredItems.map((item) => item.serial_no),
-        status: getTruckStatus(items),
+        delivered_serial_ids: deliveredItems.map((item) => item.serial_id),
+        status: getBillStatus(items),
         status_note: postponedItem?.status_note || null,
         next_delivery_date: postponedItem?.next_delivery_date || null,
         completed_at: latestCompletedItem?.delivered_datetime || null,
         proof_images: proofImages,
         signature_images: signatureImages,
         postpone_images: postponeImages,
-        items,
       };
     });
 
@@ -268,200 +215,148 @@ export const getDeliveryCompletes = async (req, res) => {
   }
 };
 
+const parseSerialIds = (value) => {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? [...new Set(parsed.map((serialId) => String(serialId || "").trim()).filter(Boolean))] : [];
+  } catch {
+    return [];
+  }
+};
+
+const fileExtension = (file) => {
+  const extension = path.extname(file.originalname || "").toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".webp"].includes(extension) ? extension : file.mimetype === "image/png" ? ".png" : file.mimetype === "image/webp" ? ".webp" : ".jpg";
+};
+
+const uploadedFiles = (req, field) => (Array.isArray(req.files?.[field]) ? req.files[field] : []);
+const shortFileName = (file) => `${randomUUID().replace(/-/g, "").slice(0, 16)}${fileExtension(file)}`;
+const receiveFolderName = (value) => String(value || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 80);
+const optionalNumber = (value, min, max) => {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : undefined;
+};
+
 export const saveDeliveryCompleteStatuses = async (req, res) => {
   let connection;
-  let transactionStarted = false;
   const createdFiles = [];
 
   try {
-    const truckLoadId = toNumberOrNull(req.params.truckLoadId);
-    const warehouseId = getWarehouseId(req);
-    const actorId = getActorId(req);
-    const deliveryStatus = String(req.body.delivery_status || "").trim().toUpperCase();
-    const requestedSerialNos = getSerialNos(req.body.serial_nos);
-    const statusNote = cleanDbText(req.body.status_note)?.slice(0, 500) || null;
-    const issueType = cleanDbText(req.body.issue_type)?.slice(0, 100) || null;
-    const requestedCompletedAt = cleanDbText(req.body.delivered_datetime);
-    const requestedNextDeliveryDate = cleanDbText(req.body.next_delivery_date);
-    const date = new Date();
-    const completedAt = requestedCompletedAt && !Number.isNaN(new Date(requestedCompletedAt).getTime())
-      ? new Date(requestedCompletedAt)
-      : date;
-    const nextDeliveryDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedNextDeliveryDate || "") ? requestedNextDeliveryDate : null;
-    const proofFiles = getUploadedFiles(req, "proof_images");
-    const signFiles = getUploadedFiles(req, "sign_images");
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const receiveCode = cleanDbText(req.body.receive_code)?.slice(0, 50) || "";
+    const serialIds = parseSerialIds(req.body.serial_ids);
+    const safeReceiveCode = receiveFolderName(receiveCode);
+    const deliveredAtInput = cleanDbText(req.body.delivered_datetime);
+    const deliveredAt = deliveredAtInput && !Number.isNaN(new Date(deliveredAtInput).getTime()) ? new Date(deliveredAtInput) : new Date();
+    const lat = optionalNumber(req.body.lat, -90, 90);
+    const lng = optionalNumber(req.body.lng, -180, 180);
+    const accuracyM = optionalNumber(req.body.accuracy_m, 0, 100000);
+    const proofFiles = uploadedFiles(req, "proof_images");
+    const signFiles = uploadedFiles(req, "sign_images");
 
-    if (!truckLoadId || !warehouseId || !actorId || !DELIVERY_STATUS_VALUES.has(deliveryStatus)) {
-      return res.status(400).json({ success: false, message: "ข้อมูลบันทึกผลจัดส่งไม่ถูกต้อง" });
+    if (!warehouseId || !actorId || !receiveCode || !safeReceiveCode || !serialIds.length || !proofFiles.length || !signFiles.length) {
+      return res.status(400).json({ success: false, message: "กรุณาเลือก SN พร้อมรูปหลักฐานและลายเซ็น" });
     }
-
-    if (deliveryStatus === "COMPLETED" && (!requestedSerialNos.length || !proofFiles.length || !signFiles.length)) {
-      return res.status(400).json({ success: false, message: "กรุณาเลือก Serial No พร้อมรูปหลักฐานและลายเซ็น" });
-    }
-
-    if (deliveryStatus === "POSTPONED" && !nextDeliveryDate) {
-      return res.status(400).json({ success: false, message: "กรุณาระบุวันจัดส่งใหม่" });
-    }
+    if (lat === undefined || lng === undefined || accuracyM === undefined) return res.status(400).json({ success: false, message: "พิกัดไม่ถูกต้อง" });
 
     connection = await db.getConnection();
     await connection.beginTransaction();
-    transactionStarted = true;
 
-    const [truckRows] = await connection.query(
-      `
-        SELECT id
-        FROM tm_trucks
-        WHERE id = ?
-          AND status = 'DC_TRUCK'
-          AND warehouse_id = ?
-          AND is_close = 'Y'
-          AND is_go = 'Y'
-          AND COALESCE(is_deleted, 'N') = 'N'
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [truckLoadId, warehouseId],
+    const placeholders = serialIds.map(() => "?").join(", ");
+    const [products] = await connection.query(
+      `SELECT DISTINCT active.serial_id, rs.serial_no, rs.receive_business_id, rs.receive_walkin_id
+       FROM tm_product_actived active
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
+       WHERE ${currentReceiveSerialSql} AND active.serial_id IN (${placeholders}) AND rs.receive_code = ? FOR UPDATE`,
+      [...serialIds, receiveCode],
     );
-
-    if (!truckRows.length) {
+    if (products.length !== serialIds.length) {
       await connection.rollback();
-      transactionStarted = false;
-      return res.status(404).json({ success: false, message: "ไม่พบใบรถกระจายที่กำลังจัดส่ง" });
+      return res.status(400).json({ success: false, message: "พบ SN ที่ไม่อยู่ในบิลนี้หรือไม่ได้อยู่ในรายการ active" });
     }
 
-    const [productRows] = await connection.query(
-      `
-        SELECT serial_id, serial_no
-        FROM tm_product_trucks
-        WHERE truck_load_id = ?
-        ORDER BY id
-        FOR UPDATE
-      `,
-      [truckLoadId],
+    const [lastTransactions] = await connection.query(
+      `SELECT serial_id FROM tm_product_transactions_last WHERE serial_id IN (${placeholders}) FOR UPDATE`,
+      serialIds,
     );
-    const [existingStatusRows] = await connection.query(
-      `
-        SELECT delivery_status_id, serial_id, serial_no, delivery_status
-        FROM tm_delivery_statuses
-        WHERE truck_load_id = ?
-        FOR UPDATE
-      `,
-      [truckLoadId],
-    );
-    const productsBySerialNo = new Map(productRows.map((product) => [String(product.serial_no), product]));
-    const completedSerialNos = new Set(
-      existingStatusRows
-        .filter((status) => status.delivery_status === "COMPLETED")
-        .map((status) => String(status.serial_no)),
-    );
-    const targetSerialNos = requestedSerialNos.length
-      ? requestedSerialNos
-      : productRows.map((product) => String(product.serial_no)).filter((serialNo) => !completedSerialNos.has(serialNo));
-    const targets = targetSerialNos.map((serialNo) => productsBySerialNo.get(serialNo)).filter(Boolean);
-
-    if (targets.length !== targetSerialNos.length) {
+    if (new Set(lastTransactions.map((item) => item.serial_id)).size !== serialIds.length) {
       await connection.rollback();
-      transactionStarted = false;
-      return res.status(400).json({ success: false, message: "พบ Serial No ที่ไม่ได้อยู่ในใบรถกระจายนี้" });
+      return res.status(400).json({ success: false, message: "ไม่พบประวัติรายการล่าสุดของ SN ที่เลือก" });
     }
 
-    if (!targets.length) {
-      await connection.rollback();
-      transactionStarted = false;
-      return res.status(409).json({ success: false, message: "ไม่มีรายการที่สามารถบันทึกผลจัดส่งได้" });
-    }
-
-    for (const product of targets) {
+    const now = new Date();
+    for (const product of products) {
       await connection.query(
-        `
-          INSERT INTO tm_delivery_statuses (
-            truck_load_id, serial_id, serial_no, delivery_status,
-            status_note, issue_type, next_delivery_date, delivered_datetime,
-            created_by, created_date, updated_by, updated_date
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            delivery_status = VALUES(delivery_status),
-            status_note = VALUES(status_note),
-            issue_type = VALUES(issue_type),
-            next_delivery_date = VALUES(next_delivery_date),
-            delivered_datetime = VALUES(delivered_datetime),
-            updated_by = VALUES(updated_by),
-            updated_date = VALUES(updated_date)
-        `,
-        [
-          truckLoadId,
-          product.serial_id,
-          product.serial_no,
-          deliveryStatus,
-          statusNote,
-          issueType,
-          deliveryStatus === "POSTPONED" ? nextDeliveryDate : null,
-          deliveryStatus === "COMPLETED" ? completedAt : null,
-          actorId,
-          date,
-          actorId,
-          date,
-        ],
+        `INSERT INTO tm_delivery_statuses (truck_load_id, serial_id, serial_no, delivery_status, delivered_datetime, source, lat, lng, accuracy_m, created_by, created_date, updated_by, updated_date)
+         VALUES (NULL, ?, ?, 'COMPLETED', ?, 'WEB_ADMIN', ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE truck_load_id = NULL, delivery_status = 'COMPLETED', delivered_datetime = VALUES(delivered_datetime), source = 'WEB_ADMIN', lat = VALUES(lat), lng = VALUES(lng), accuracy_m = VALUES(accuracy_m), updated_by = VALUES(updated_by), updated_date = VALUES(updated_date)`,
+        [product.serial_id, product.serial_no, deliveredAt, lat, lng, accuracyM, actorId, now, actorId, now],
       );
     }
 
-    const statusPlaceholders = targets.map(() => "?").join(", ");
-    const [statusRows] = await connection.query(
-      `
-        SELECT delivery_status_id, serial_no
-        FROM tm_delivery_statuses
-        WHERE truck_load_id = ?
-          AND serial_no IN (${statusPlaceholders})
-      `,
-      [truckLoadId, ...targets.map((product) => product.serial_no)],
+    const [statuses] = await connection.query(
+      `SELECT delivery_status_id FROM tm_delivery_statuses WHERE serial_id IN (${placeholders})`,
+      serialIds,
     );
-
-    for (const statusRow of statusRows) {
-      for (const mediaField of MEDIA_FIELDS) {
-        for (const file of getUploadedFiles(req, mediaField.field)) {
-          const relativeDirectory = path.posix.join(
-            "delivery-closes",
-            String(truckLoadId),
-            String(statusRow.delivery_status_id),
-            mediaField.folder,
-          );
+    if (statuses.length !== serialIds.length) throw new Error("delivery status rows are incomplete");
+    const mediaGroups = [
+      { type: "PROOF_IMAGE", folder: "proof", files: proofFiles },
+      { type: "SIGNATURE_IMAGE", folder: "signature", files: signFiles },
+    ];
+    for (const group of mediaGroups) {
+      for (const file of group.files) {
+          const relativeDirectory = path.posix.join("delivery-closes", safeReceiveCode, group.folder);
           const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
-          const fileName = `${randomUUID()}${getImageExtension(file)}`;
-          const absolutePath = path.join(absoluteDirectory, fileName);
-          const filePath = `/uploads/${relativeDirectory}/${fileName}`;
-
+          const name = shortFileName(file);
+          const absolutePath = path.join(absoluteDirectory, name);
+          const filePath = `/uploads/${relativeDirectory}/${name}`;
           await fs.mkdir(absoluteDirectory, { recursive: true });
           await fs.writeFile(absolutePath, file.buffer);
           createdFiles.push(absolutePath);
-          await connection.query(
-            `
-              INSERT INTO tm_delivery_status_media (
-                delivery_status_id, media_type, file_name, file_path,
-                mime_type, file_size, created_by, created_date
-              )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-            [statusRow.delivery_status_id, mediaField.mediaType, fileName, filePath, file.mimetype, file.size, actorId, date],
+          for (const status of statuses) await connection.query(
+            `INSERT INTO tm_delivery_status_media (delivery_status_id, media_type, file_name, file_path, mime_type, file_size, created_by, created_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [status.delivery_status_id, group.type, name, filePath, file.mimetype, file.size, actorId, now],
           );
-        }
       }
     }
 
-    await connection.commit();
-    transactionStarted = false;
+    const year = now.getFullYear();
+    const yearMonth = year * 100 + now.getMonth() + 1;
+    await connection.query(
+      `INSERT INTO tm_product_transactions (
+         receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no,
+         status_message, status_id, datetime, update_date, type,
+         warehouse_id, created_by, latitude, longitude, warehouse_name,
+         address, province_name, district_name, subdistrict_name, zip_code,
+         created_name, username, user_id, data_year, data_yearmonth
+       )
+       SELECT
+         rs.receive_business_id, rs.receive_walkin_id, rs.receive_code, active.serial_id, rs.serial_no,
+         'จัดส่งสำเร็จ', 18, ?, ?, 'WEB_ADMIN',
+         ?, ?, ?, ?, previous.warehouse_name,
+         previous.address, previous.province_name, previous.district_name, previous.subdistrict_name, previous.zip_code,
+         previous.created_name, previous.username, previous.user_id, ?, ?
+       FROM tm_product_actived active
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
+       INNER JOIN tm_product_transactions_last previous ON previous.serial_id = active.serial_id
+       WHERE ${currentReceiveSerialSql} AND active.serial_id IN (${placeholders}) AND rs.receive_code = ?`,
+      [deliveredAt, now, warehouseId, actorId, lat === null ? null : String(lat), lng === null ? null : String(lng), year, yearMonth, ...serialIds, receiveCode],
+    );
+    await connection.query(
+      `UPDATE tm_product_transactions_last
+       SET status_message = 'จัดส่งสำเร็จ', status_id = 18, datetime = ?, update_date = ?, type = 'WEB_ADMIN', warehouse_id = ?, created_by = ?, latitude = ?, longitude = ?
+       WHERE serial_id IN (${placeholders})`,
+      [deliveredAt, now, warehouseId, actorId, lat === null ? null : String(lat), lng === null ? null : String(lng), ...serialIds],
+    );
+    await connection.query(`DELETE FROM tm_product_actived WHERE serial_id IN (${placeholders})`, serialIds);
 
-    return res.status(200).json({
-      success: true,
-      message: "บันทึกผลจัดส่งสำเร็จ",
-      data: {
-        truck_load_id: truckLoadId,
-        delivery_status: deliveryStatus,
-        serial_nos: targets.map((product) => product.serial_no),
-      },
-    });
+    await connection.commit();
+    return res.status(200).json({ success: true, message: "บันทึกผลจัดส่งสำเร็จ", data: { receive_code: receiveCode, serial_ids: serialIds } });
   } catch (error) {
-    if (connection && transactionStarted) await connection.rollback();
+    await connection?.rollback();
     await Promise.all(createdFiles.map((filePath) => fs.unlink(filePath).catch(() => undefined)));
     console.error("saveDeliveryCompleteStatuses error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถบันทึกผลจัดส่งได้" });

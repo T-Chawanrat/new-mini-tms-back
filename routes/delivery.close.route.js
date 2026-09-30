@@ -20,13 +20,11 @@ const uploadDeliveryMedia = multer({
 
 router.get("/", auth, getDeliveryCompletes);
 router.post(
-  "/:truckLoadId/statuses",
+  "/statuses",
   auth,
   uploadDeliveryMedia.fields([
     { name: "proof_images", maxCount: 8 },
     { name: "sign_images", maxCount: 1 },
-    { name: "reschedule_images", maxCount: 8 },
-    { name: "return_images", maxCount: 8 },
   ]),
   saveDeliveryCompleteStatuses,
 );

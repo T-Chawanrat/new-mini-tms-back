@@ -2,6 +2,9 @@ import db from "../config/db.js";
 import { randomUUID } from "node:crypto";
 import { cleanCode, toNumberOrNull } from "../utils/cleanText.js";
 import { syncTruckBoxCount } from "../utils/truckUtils.js";
+import { buildTruckVehicleSql } from "../utils/truckVehicleSql.js";
+
+const truckVehicleSql = buildTruckVehicleSql();
 
 const TRUCK_LIST_SELECT = `
   truck.id AS truck_load_id,
@@ -17,10 +20,10 @@ const TRUCK_LIST_SELECT = `
       truck.driver_name
     )
   END AS driver_name,
-  COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-  COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
-  COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
-  (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS count_box,
+  ${truckVehicleSql.licensePlate} AS license_plate,
+  ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id,
+  ${truckVehicleSql.licenseProvince} AS license_province,
+  COALESCE(truck_count.count_box, 0) AS count_box,
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name
 `;
@@ -39,6 +42,8 @@ const TRUCK_LIST_JOINS = `
     ON contractor_vehicle.id = truck.vehicle_contractor_id
   LEFT JOIN mm_province contractor_province
     ON contractor_province.id = contractor_vehicle.license_plate_province_id
+  LEFT JOIN tm_truck_count truck_count
+    ON truck_count.truck_load_id = truck.id
 `;
 
 export const getMoveTkSourceTrucks = async (req, res) => {
@@ -128,9 +133,9 @@ export const getMoveTkProducts = async (req, res) => {
           product_truck.serial_id,
           product_truck.serial_no,
           truck.driver_type,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
-          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id,
+          ${truckVehicleSql.licenseProvince} AS license_province,
           COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
           destination.warehouse_name AS to_warehouse_name
         FROM tm_product_trucks product_truck
@@ -173,9 +178,9 @@ export const getMoveTkProducts = async (req, res) => {
               temp.serial_id,
               temp.serial_no,
               truck.driver_type,
-              COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-              COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
-              COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
+              ${truckVehicleSql.licensePlate} AS license_plate,
+              ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id,
+              ${truckVehicleSql.licenseProvince} AS license_province,
               COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
               destination.warehouse_name AS to_warehouse_name
             FROM tmp_product_trucks temp
@@ -526,7 +531,7 @@ export const moveTkProducts = async (req, res) => {
     await syncTruckBoxCount(connection, targetTruckLoadId);
 
     const [sourceCountRows] = await connection.query(
-      `SELECT COUNT(*) AS count_box FROM tm_truck_details WHERE truck_load_id = ?`,
+      `SELECT COALESCE(count_box, 0) AS count_box FROM tm_truck_count WHERE truck_load_id = ?`,
       [sourceTruckLoadId],
     );
     const sourceIsEmpty = Number(sourceCountRows[0]?.count_box || 0) === 0;

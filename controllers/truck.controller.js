@@ -8,6 +8,14 @@ import {
 } from "../utils/cleanText.js";
 import { getPagination } from "../utils/pagination.js";
 import { cleanYN, syncTruckBoxCount } from "../utils/truckUtils.js";
+import { buildTruckVehicleSql } from "../utils/truckVehicleSql.js";
+import { insertProductTruckLog, insertProductWarehouseLog } from "../utils/productLogUtils.js";
+
+const truckVehicleSql = buildTruckVehicleSql({
+  vehicleAlias: "vehicle",
+  contractorVehicleAlias: "contractor_vehicle",
+  contractorProvinceAlias: "contractor_plate_province",
+});
 
 const createTruckCode = async (connection, now) => {
   const dateParts = new Intl.DateTimeFormat("en-CA", {
@@ -63,7 +71,7 @@ const TRUCK_SELECT_FIELDS = `
   t.driver_type,
   t.vehicle_id,
   t.vehicle_contractor_id,
-  COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
+  ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id,
   t.status,
   t.warehouse_id,
   t.to_warehouse_id,
@@ -80,11 +88,7 @@ const TRUCK_SELECT_FIELDS = `
   t.arrived_datetime,
   t.note,
   t.sub_warehouse,
-  COALESCE(
-    truck_count.count_box,
-    (SELECT COUNT(*) FROM tm_truck_details detail_count WHERE detail_count.truck_load_id = t.id),
-    0
-  ) AS count_box,
+  COALESCE(truck_count.count_box, 0) AS count_box,
 
   warehouse_from.warehouse_name AS warehouse_name,
   warehouse_to.warehouse_name AS to_warehouse_name,
@@ -100,14 +104,10 @@ const TRUCK_SELECT_FIELDS = `
     ''
   ) AS closed_by_name,
 
-  COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-  COALESCE(vehicle.license_plate_province, contractor_plate_province.province_name) AS license_province,
-  COALESCE(vehicle.model, contractor_vehicle.model) AS model,
-  COALESCE(
-    truck_count.count_box,
-    (SELECT COUNT(*) FROM tm_truck_details detail_count WHERE detail_count.truck_load_id = t.id),
-    0
-  ) AS serial_count
+  ${truckVehicleSql.licensePlate} AS license_plate,
+  ${truckVehicleSql.licenseProvince} AS license_province,
+  ${truckVehicleSql.model} AS model,
+  COALESCE(truck_count.count_box, 0) AS serial_count
 `;
 
 const TRUCK_FROM_JOINS = `
@@ -210,7 +210,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.zip_code,
         TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         actor.username,
-        COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        ${truckVehicleSql.licensePlate},
         truck.user_truck_id,
         truck.user_truck_id,
         truck.truck_code,
@@ -274,7 +274,7 @@ const writeTruckTransactions = async ({ connection, truckLoadId, actorId, status
         transaction_last.warehouse_name = warehouse.warehouse_name,
         transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         transaction_last.username = actor.username,
-        transaction_last.truck_license_plate = COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        transaction_last.truck_license_plate = ${truckVehicleSql.licensePlate},
         transaction_last.user_id = truck.user_truck_id,
         transaction_last.user_truck_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
@@ -721,64 +721,35 @@ export const loadTruckProduct = async (req, res) => {
       ],
     );
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_trucks (
-          product_truck_id,
-          serial_id,
-          serial_no,
-          event_type,
-          created_by,
-          user_truck_id,
-          driver_name,
-          truck_id,
-          truck_license_plate,
-          license_plate_province_id,
-          status,
-          truck_load_id,
-          is_dc_mismatch,
-          parcel_to_warehouse_id,
-          truck_to_warehouse_id,
-          created_date
-        )
-        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'LOADED', ?, ?, ?, ?, ?)
-      `,
-      [
-        productTruckResult.insertId,
-        product.serial_id,
-        product.serial_no,
-        actorId,
-        truckLoad.user_truck_id,
-        truckLoad.driver_name,
-        truckLoad.vehicle_id ?? truckLoad.vehicle_contractor_id,
-        truckLoad.license_plate,
-        truckLoad.license_plate_province_id,
-        truckLoadId,
-        destinationMatches ? "N" : "Y",
-        product.to_warehouse_id,
-        truckLoad.to_warehouse_id,
-        now,
-      ],
-    );
+    await insertProductTruckLog(connection, {
+      product_truck_id: productTruckResult.insertId,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "LOAD",
+      created_by: actorId,
+      user_truck_id: truckLoad.user_truck_id,
+      driver_name: truckLoad.driver_name,
+      truck_id: truckLoad.vehicle_id ?? truckLoad.vehicle_contractor_id,
+      truck_license_plate: truckLoad.license_plate,
+      license_plate_province_id: truckLoad.license_plate_province_id,
+      status: "LOADED",
+      truck_load_id: truckLoadId,
+      is_dc_mismatch: destinationMatches ? "N" : "Y",
+      parcel_to_warehouse_id: product.to_warehouse_id,
+      truck_to_warehouse_id: truckLoad.to_warehouse_id,
+      created_date: now,
+    });
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_warehouses (
-          product_warehouse_id, serial_id, serial_no, event_type,
-          now_warehouse_id, to_warehouse_id, created_by, created_date
-        )
-        VALUES (?, ?, ?, 'TRUCK_OUT', ?, ?, ?, ?)
-      `,
-      [
-        product.product_warehouse_id,
-        product.serial_id,
-        product.serial_no,
-        truckLoad.warehouse_id,
-        product.to_warehouse_id,
-        actorId,
-        now,
-      ],
-    );
+    await insertProductWarehouseLog(connection, {
+      product_warehouse_id: product.product_warehouse_id,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "TRUCK_OUT",
+      now_warehouse_id: truckLoad.warehouse_id,
+      to_warehouse_id: product.to_warehouse_id,
+      created_by: actorId,
+      created_date: now,
+    });
 
     await connection.query(
       `
@@ -847,8 +818,10 @@ export const closeAndGoTruckLoad = async (req, res) => {
           truck.id,
           truck.is_close,
           truck.is_go,
-          (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS serial_count
+          COALESCE(truck_count.count_box, 0) AS serial_count
         FROM tm_trucks truck
+        LEFT JOIN tm_truck_count truck_count
+          ON truck_count.truck_load_id = truck.id
         WHERE truck.id = ?
           AND COALESCE(truck.is_deleted, 'N') = 'N'
         LIMIT 1
@@ -925,8 +898,8 @@ export const closeAndGoTruckLoad = async (req, res) => {
             product_truck.user_truck_id,
             COALESCE(product_truck.driver_name, truck.driver_name),
             product_truck.truck_id,
-            COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
-            COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
+            ${truckVehicleSql.licensePlate},
+            ${truckVehicleSql.licensePlateProvinceId},
             'DELIVERING',
             product_truck.truck_load_id,
             CASE
@@ -1068,8 +1041,8 @@ export const unloadTruckProduct = async (req, res) => {
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name) AS driver_name,
           COALESCE(product_truck.truck_id, truck.vehicle_contractor_id) AS truck_id,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS truck_license_plate,
-          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id,
+          ${truckVehicleSql.licensePlate} AS truck_license_plate,
+          ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id,
           product_truck.status,
           product_truck.truck_load_id,
           product_warehouse.resend_date,
@@ -1138,30 +1111,16 @@ export const unloadTruckProduct = async (req, res) => {
       ],
     );
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_warehouses (
-          product_warehouse_id,
-          serial_id,
-          serial_no,
-          event_type,
-          now_warehouse_id,
-          to_warehouse_id,
-          created_by,
-          created_date
-        )
-        VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
-      `,
-      [
-        restoredWarehouseResult.insertId,
-        productTruck.serial_id,
-        productTruck.serial_no,
-        productTruck.from_warehouse_id,
-        productTruck.restore_to_warehouse_id || productTruck.truck_to_warehouse_id,
-        actorId,
-        now,
-      ],
-    );
+    await insertProductWarehouseLog(connection, {
+      product_warehouse_id: restoredWarehouseResult.insertId,
+      serial_id: productTruck.serial_id,
+      serial_no: productTruck.serial_no,
+      event_type: "RETURN_WH",
+      now_warehouse_id: productTruck.from_warehouse_id,
+      to_warehouse_id: productTruck.restore_to_warehouse_id || productTruck.truck_to_warehouse_id,
+      created_by: actorId,
+      created_date: now,
+    });
 
     await connection.query(
       `DELETE FROM tm_truck_details WHERE truck_load_id = ? AND serial_no = ?`,
@@ -1172,46 +1131,24 @@ export const unloadTruckProduct = async (req, res) => {
       [productTruck.id],
     );
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_trucks (
-          product_truck_id,
-          serial_id,
-          serial_no,
-          event_type,
-          created_by,
-          user_truck_id,
-          driver_name,
-          truck_id,
-          truck_license_plate,
-          license_plate_province_id,
-          status,
-          truck_load_id,
-          is_dc_mismatch,
-          parcel_to_warehouse_id,
-          truck_to_warehouse_id,
-          created_date
-        )
-        VALUES (?, ?, ?, 'UNLOAD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        productTruck.id,
-        productTruck.serial_id,
-        productTruck.serial_no,
-        actorId,
-        productTruck.user_truck_id,
-        productTruck.driver_name,
-        productTruck.truck_id,
-        productTruck.truck_license_plate,
-        productTruck.license_plate_province_id,
-        productTruck.status,
-        productTruck.truck_load_id,
-        isDcMismatch,
-        productTruck.parcel_to_warehouse_id,
-        productTruck.truck_to_warehouse_id,
-        now,
-      ],
-    );
+    await insertProductTruckLog(connection, {
+      product_truck_id: productTruck.id,
+      serial_id: productTruck.serial_id,
+      serial_no: productTruck.serial_no,
+      event_type: "UNLOAD",
+      created_by: actorId,
+      user_truck_id: productTruck.user_truck_id,
+      driver_name: productTruck.driver_name,
+      truck_id: productTruck.truck_id,
+      truck_license_plate: productTruck.truck_license_plate,
+      license_plate_province_id: productTruck.license_plate_province_id,
+      status: productTruck.status,
+      truck_load_id: productTruck.truck_load_id,
+      is_dc_mismatch: isDcMismatch,
+      parcel_to_warehouse_id: productTruck.parcel_to_warehouse_id,
+      truck_to_warehouse_id: productTruck.truck_to_warehouse_id,
+      created_date: now,
+    });
 
     await syncTruckBoxCount(connection, truckLoadId);
 
@@ -1360,8 +1297,8 @@ export const deleteTruckLoad = async (req, res) => {
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
           COALESCE(product_truck.truck_id, truck.vehicle_contractor_id),
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
-          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
+          ${truckVehicleSql.licensePlate},
+          ${truckVehicleSql.licensePlateProvinceId},
           product_truck.status,
           product_truck.truck_load_id,
           CASE

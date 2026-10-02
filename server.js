@@ -31,6 +31,7 @@ import deliveryTruckRoutes from "./routes/delivery.truck.route.js";
 import deliveryCompleteRoutes from "./routes/delivery.complete.route.js";
 import deliveryCloseRoutes from "./routes/delivery.close.route.js";
 import deliveryPendingReportRoutes from "./routes/delivery.pending.report.route.js";
+import deliveryIssueRoutes from "./routes/delivery.issue.route.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +70,7 @@ app.use("/delivery-trucks", deliveryTruckRoutes);
 app.use("/delivery-completes", deliveryCompleteRoutes);
 app.use("/delivery-closes", deliveryCloseRoutes);
 app.use("/delivery-reports", deliveryPendingReportRoutes);
+app.use("/delivery-issues", deliveryIssueRoutes);
 app.use("/dc-receives", dcReceiveRoutes);
 app.use("/move-tk", moveTkRoutes);
 app.use("/move-dt", moveDtRoutes);

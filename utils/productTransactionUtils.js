@@ -12,7 +12,6 @@ export const insertInitialProductTransactions = async ({
   receiveId,
   createdBy,
   now,
-  useDatabaseDataPeriod = false,
   createError = createTransactionError,
 }) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
@@ -30,12 +29,8 @@ export const insertInitialProductTransactions = async ({
   const dataYearmonth = dataYear * 100 + now.getMonth() + 1;
 
   const insertTransaction = async (tableName, includeDataPeriod, includeCreatedDate) => {
-    const dataPeriodSql = includeDataPeriod
-      ? useDatabaseDataPeriod
-        ? `, YEAR(NOW()) AS data_year, CAST(DATE_FORMAT(NOW(), '%Y%m') AS UNSIGNED) AS data_yearmonth`
-        : `, ? AS data_year, ? AS data_yearmonth`
-      : "";
-    const dataPeriodParams = includeDataPeriod && !useDatabaseDataPeriod ? [dataYear, dataYearmonth] : [];
+    const dataPeriodSql = includeDataPeriod ? `, ? AS data_year, ? AS data_yearmonth` : "";
+    const dataPeriodParams = includeDataPeriod ? [dataYear, dataYearmonth] : [];
 
     await conn.query(
       `

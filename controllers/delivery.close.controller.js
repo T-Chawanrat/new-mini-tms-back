@@ -60,9 +60,7 @@ export const getDeliveryCompletes = async (req, res) => {
       reference_no: "COALESCE(ref.reference_no, '')",
     };
     const selectedSearchField = searchFieldByType[requestedSearchType];
-    const searchSql = search
-      ? `${selectedSearchField || "rs.receive_code"} LIKE ?`
-      : "1 = 1";
+    const searchSql = search ? `${selectedSearchField || "rs.receive_code"} LIKE ?` : "1 = 1";
     const searchParams = search ? [`%${search}%`] : [];
     const billIsRelevantSql = `(
       EXISTS (SELECT 1 FROM tm_product_actived active WHERE active.serial_id = rs.serial_id)
@@ -111,9 +109,7 @@ export const getDeliveryCompletes = async (req, res) => {
       });
     }
 
-    const billCondition = billRows
-      .map(() => "(rs.receive_business_id <=> ? AND rs.receive_walkin_id <=> ? AND rs.receive_code = ?)")
-      .join(" OR ");
+    const billCondition = billRows.map(() => "(rs.receive_business_id <=> ? AND rs.receive_walkin_id <=> ? AND rs.receive_code = ?)").join(" OR ");
     const billParams = billRows.flatMap((bill) => [bill.receive_business_id, bill.receive_walkin_id, bill.receive_code]);
     const [itemRows] = await db.query(
       `
@@ -138,14 +134,14 @@ export const getDeliveryCompletes = async (req, res) => {
     const statusIds = [...new Set(itemRows.map((item) => item.delivery_status_id).filter(Boolean))];
     const [mediaRows] = statusIds.length
       ? await db.query(
-        `
+          `
           SELECT delivery_status_id, media_type, file_name, file_path
           FROM tm_delivery_status_media
           WHERE delivery_status_id IN (${statusIds.map(() => "?").join(", ")})
           ORDER BY delivery_status_media_id
         `,
-        statusIds,
-      )
+          statusIds,
+        )
       : [[]];
     const mediaByStatusId = new Map();
     for (const media of mediaRows) {
@@ -226,12 +222,21 @@ const parseSerialIds = (value) => {
 
 const fileExtension = (file) => {
   const extension = path.extname(file.originalname || "").toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".webp"].includes(extension) ? extension : file.mimetype === "image/png" ? ".png" : file.mimetype === "image/webp" ? ".webp" : ".jpg";
+  return [".jpg", ".jpeg", ".png", ".webp"].includes(extension)
+    ? extension
+    : file.mimetype === "image/png"
+      ? ".png"
+      : file.mimetype === "image/webp"
+        ? ".webp"
+        : ".jpg";
 };
 
 const uploadedFiles = (req, field) => (Array.isArray(req.files?.[field]) ? req.files[field] : []);
 const shortFileName = (file) => `${randomUUID().replace(/-/g, "").slice(0, 16)}${fileExtension(file)}`;
-const receiveFolderName = (value) => String(value || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 80);
+const receiveFolderName = (value) =>
+  String(value || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 80);
 const optionalNumber = (value, min, max) => {
   if (value === undefined || value === null || String(value).trim() === "") return null;
   const number = Number(value);
@@ -259,7 +264,8 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     if (!warehouseId || !actorId || !receiveCode || !safeReceiveCode || !serialIds.length || !proofFiles.length || !signFiles.length) {
       return res.status(400).json({ success: false, message: "กรุณาเลือก SN พร้อมรูปหลักฐานและลายเซ็น" });
     }
-    if (lat === undefined || lng === undefined || accuracyM === undefined) return res.status(400).json({ success: false, message: "พิกัดไม่ถูกต้อง" });
+    if (lat === undefined || lng === undefined || accuracyM === undefined)
+      return res.status(400).json({ success: false, message: "พิกัดไม่ถูกต้อง" });
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -296,10 +302,7 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       );
     }
 
-    const [statuses] = await connection.query(
-      `SELECT delivery_status_id FROM tm_delivery_statuses WHERE serial_id IN (${placeholders})`,
-      serialIds,
-    );
+    const [statuses] = await connection.query(`SELECT delivery_status_id FROM tm_delivery_statuses WHERE serial_id IN (${placeholders})`, serialIds);
     if (statuses.length !== serialIds.length) throw new Error("delivery status rows are incomplete");
     const mediaGroups = [
       { type: "PROOF_IMAGE", folder: "proof", files: proofFiles },
@@ -307,15 +310,16 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     ];
     for (const group of mediaGroups) {
       for (const file of group.files) {
-          const relativeDirectory = path.posix.join("delivery-closes", safeReceiveCode, group.folder);
-          const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
-          const name = shortFileName(file);
-          const absolutePath = path.join(absoluteDirectory, name);
-          const filePath = `/uploads/${relativeDirectory}/${name}`;
-          await fs.mkdir(absoluteDirectory, { recursive: true });
-          await fs.writeFile(absolutePath, file.buffer);
-          createdFiles.push(absolutePath);
-          for (const status of statuses) await connection.query(
+        const relativeDirectory = path.posix.join("delivery-closes", safeReceiveCode, group.folder);
+        const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
+        const name = shortFileName(file);
+        const absolutePath = path.join(absoluteDirectory, name);
+        const filePath = `/uploads/${relativeDirectory}/${name}`;
+        await fs.mkdir(absoluteDirectory, { recursive: true });
+        await fs.writeFile(absolutePath, file.buffer);
+        createdFiles.push(absolutePath);
+        for (const status of statuses)
+          await connection.query(
             `INSERT INTO tm_delivery_status_media (delivery_status_id, media_type, file_name, file_path, mime_type, file_size, created_by, created_date)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [status.delivery_status_id, group.type, name, filePath, file.mimetype, file.size, actorId, now],
@@ -343,7 +347,18 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
        INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
        INNER JOIN tm_product_transactions_last previous ON previous.serial_id = active.serial_id
        WHERE ${currentReceiveSerialSql} AND active.serial_id IN (${placeholders}) AND rs.receive_code = ?`,
-      [deliveredAt, now, warehouseId, actorId, lat === null ? null : String(lat), lng === null ? null : String(lng), year, yearMonth, ...serialIds, receiveCode],
+      [
+        deliveredAt,
+        now,
+        warehouseId,
+        actorId,
+        lat === null ? null : String(lat),
+        lng === null ? null : String(lng),
+        year,
+        yearMonth,
+        ...serialIds,
+        receiveCode,
+      ],
     );
     await connection.query(
       `UPDATE tm_product_transactions_last

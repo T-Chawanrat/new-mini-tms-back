@@ -71,8 +71,12 @@ const buildReceiveReportWhere = (query, alias = "t") => {
   }
 
   if (receiveCode) {
-    where.push(`${alias}.receive_code LIKE ?`);
-    params.push(`%${receiveCode}%`);
+    where.push(`(
+      ${alias}.receive_code LIKE ?
+      OR ${alias}.serial_no LIKE ?
+      OR ${alias}.reference_no LIKE ?
+    )`);
+    params.push(`%${receiveCode}%`, `%${receiveCode}%`, `%${receiveCode}%`);
   }
 
   if (customerId !== null) {

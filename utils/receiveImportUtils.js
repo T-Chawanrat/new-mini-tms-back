@@ -1021,6 +1021,5 @@ export const insertImportProductTransactions = async ({
     receiveId,
     createdBy,
     now,
-    useDatabaseDataPeriod: true,
     createError: createImportError,
   });

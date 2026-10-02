@@ -46,6 +46,11 @@ const serialSearchSql = (search) => `(
 export const getDeliveryReportByDt = async (req, res) => {
   try {
     const search = cleanDbText(req.query.search);
+    const requestedDeliveryStatus = cleanDbText(req.query.delivery_status)?.toUpperCase();
+    const deliveryStatus =
+      requestedDeliveryStatus === "ALL" || requestedDeliveryStatus === "PENDING" || requestedDeliveryStatus === "DELIVERED"
+        ? requestedDeliveryStatus
+        : "PENDING";
     const { dateFrom, dateTo } = getDateRange(req.query);
     const where = [];
     const params = [];
@@ -67,6 +72,13 @@ export const getDeliveryReportByDt = async (req, res) => {
     if (dateTo) {
       where.push("report.created_date <= ?");
       params.push(dateTo);
+    }
+
+    if (deliveryStatus === "DELIVERED") {
+      where.push("COALESCE(report.total_sn, 0) > 0");
+      where.push("COALESCE(report.delivered_sn, 0) >= COALESCE(report.total_sn, 0)");
+    } else if (deliveryStatus === "PENDING") {
+      where.push("COALESCE(report.delivered_sn, 0) < COALESCE(report.total_sn, 0)");
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -122,7 +134,8 @@ export const getDeliveryReportByReceive = async (req, res) => {
     const [rows] = await db.query(
       `
         SELECT
-          report.*
+          report.*,
+          GREATEST(COALESCE(report.total_sn, 0) - COALESCE(report.delivered_sn, 0), 0) AS pending_sn
         FROM vw_delivery_report_receive report
         ${whereSql}
         ORDER BY report.delivery_date DESC, report.receive_code DESC
@@ -148,6 +161,7 @@ export const getDeliveryReportBySn = async (req, res) => {
   try {
     const search = cleanDbText(req.query.search);
     const toWarehouseId = toNumberOrNull(req.query.to_warehouse_id);
+    const deliveryStatus = cleanDbText(req.query.delivery_status)?.toUpperCase();
     const { dateFrom, dateTo } = getDateRange(req.query);
     const where = [];
     const params = [];
@@ -163,6 +177,12 @@ export const getDeliveryReportBySn = async (req, res) => {
     if (toWarehouseId !== null) {
       where.push("report.to_warehouse_id = ?");
       params.push(toWarehouseId);
+    }
+
+    if (deliveryStatus === "DELIVERED") {
+      where.push("report.status_id = 18");
+    } else if (deliveryStatus === "PENDING") {
+      where.push("COALESCE(report.status_id, 0) <> 18");
     }
 
     if (dateFrom) {

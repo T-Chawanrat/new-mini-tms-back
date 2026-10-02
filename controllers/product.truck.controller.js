@@ -1,6 +1,9 @@
 import db from "../config/db.js";
 import { toNumberOrNull } from "../utils/cleanText.js";
 import { getPositiveInteger } from "../utils/pagination.js";
+import { buildTruckVehicleSql } from "../utils/truckVehicleSql.js";
+
+const truckVehicleSql = buildTruckVehicleSql();
 
 export const getProductTrucks = async (req, res) => {
   try {
@@ -26,9 +29,9 @@ export const getProductTrucks = async (req, res) => {
             OR truck.truck_code LIKE ?
             OR COALESCE(NULLIF(product_truck.driver_name, ''), TRIM(CONCAT_WS(' ', driver.first_name, driver.last_name))) LIKE ?
             OR driver.username LIKE ?
-            OR COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) LIKE ?
-            OR COALESCE(vehicle.license_plate_province, contractor_province.province_name) LIKE ?
-            OR COALESCE(vehicle.model, contractor_vehicle.model) LIKE ?
+            OR ${truckVehicleSql.licensePlate} LIKE ?
+            OR ${truckVehicleSql.licenseProvince} LIKE ?
+            OR ${truckVehicleSql.model} LIKE ?
             OR truck.driver_type LIKE ?
             OR warehouse_from.warehouse_name LIKE ? OR warehouse_to.warehouse_name LIKE ?
             OR route.route_code LIKE ? OR route.route_name LIKE ?
@@ -100,9 +103,9 @@ export const getProductTrucks = async (req, res) => {
             NULLIF(TRIM(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, ''))), '')
           ) AS driver_name,
           driver.username AS driver_username,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_plate_province,
-          COALESCE(vehicle.model, contractor_vehicle.model) AS vehicle_model,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_plate_province,
+          ${truckVehicleSql.model} AS vehicle_model,
           warehouse_from.warehouse_name AS warehouse_name,
           warehouse_to.warehouse_name AS to_warehouse_name,
           NULLIF(

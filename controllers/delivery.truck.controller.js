@@ -1,6 +1,10 @@
 import db from "../config/db.js";
 import { cleanCode, cleanDbText, toNumberOrNull } from "../utils/cleanText.js";
 import { syncTruckBoxCount } from "../utils/truckUtils.js";
+import { buildTruckVehicleSql } from "../utils/truckVehicleSql.js";
+import { insertProductTruckLog, insertProductWarehouseLog } from "../utils/productLogUtils.js";
+
+const truckVehicleSql = buildTruckVehicleSql();
 
 const getActorId = (req) => toNumberOrNull(req.user?.id ?? req.user?.user_id);
 
@@ -121,7 +125,7 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
         transaction_last.address, transaction_last.province_name, transaction_last.district_name, transaction_last.subdistrict_name, transaction_last.zip_code,
         TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         actor.username,
-        COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        ${truckVehicleSql.licensePlate},
         truck.user_truck_id,
         truck.user_truck_id,
         truck.truck_code,
@@ -184,7 +188,7 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
         transaction_last.warehouse_name = warehouse.warehouse_name,
         transaction_last.created_name = TRIM(CONCAT_WS(' ', NULLIF(actor.first_name, ''), NULLIF(actor.last_name, ''))),
         transaction_last.username = actor.username,
-        transaction_last.truck_license_plate = COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
+        transaction_last.truck_license_plate = ${truckVehicleSql.licensePlate},
         transaction_last.user_id = truck.user_truck_id,
         transaction_last.user_truck_id = truck.user_truck_id,
         transaction_last.truck_name = truck.truck_code,
@@ -295,8 +299,8 @@ export const getDeliveryTrucks = async (req, res) => {
           truck.route_id,
           COALESCE(NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''), truck.driver_name) AS driver_name,
           driver.tel,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_plate_province,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_plate_province,
           route.route_code,
           route.route_name,
           COALESCE(truck_count.count_box, 0) AS count_box
@@ -351,9 +355,9 @@ export const getDeliveryTruckById = async (req, res) => {
           warehouse.warehouse_name,
           driver.employee_code,
           COALESCE(NULLIF(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, '')), ''), truck.driver_name) AS driver_name,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_plate_province,
-          COALESCE(vehicle.model, contractor_vehicle.model) AS model,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_plate_province,
+          ${truckVehicleSql.model} AS model,
           route.route_code,
           route.route_name
         FROM tm_trucks truck
@@ -483,8 +487,8 @@ export const getDeliveryTruckPrint = async (req, res) => {
           warehouse.warehouse_name,
           route.route_code,
           route.route_name,
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province, contractor_province.province_name) AS license_province,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_province,
           COALESCE(truck_count.count_box, 0) AS serial_count
         FROM tm_trucks truck
         LEFT JOIN mm_warehouses_to warehouse
@@ -583,8 +587,10 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
           truck.id,
           truck.is_close,
           truck.is_go,
-          (SELECT COUNT(*) FROM tm_truck_details detail WHERE detail.truck_load_id = truck.id) AS serial_count
+          COALESCE(truck_count.count_box, 0) AS serial_count
         FROM tm_trucks truck
+        LEFT JOIN tm_truck_count truck_count
+          ON truck_count.truck_load_id = truck.id
         WHERE truck.id = ?
           AND truck.status = 'DC_TRUCK'
           AND truck.warehouse_id = ?
@@ -666,8 +672,8 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
             product_truck.user_truck_id,
             COALESCE(product_truck.driver_name, truck.driver_name),
             product_truck.truck_id,
-            COALESCE(vehicle.license_plate, contractor_vehicle.license_plate),
-            COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id),
+            ${truckVehicleSql.licensePlate},
+            ${truckVehicleSql.licensePlateProvinceId},
             'DELIVERING',
             product_truck.truck_load_id,
             'N',
@@ -811,8 +817,8 @@ export const loadDeliveryTruckProduct = async (req, res) => {
     const [vehicleRows] = await connection.query(
       `
         SELECT
-          COALESCE(vehicle.license_plate, contractor_vehicle.license_plate) AS license_plate,
-          COALESCE(vehicle.license_plate_province_id, contractor_vehicle.license_plate_province_id) AS license_plate_province_id
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licensePlateProvinceId} AS license_plate_province_id
         FROM tm_trucks truck
         LEFT JOIN mm_vehicles vehicle ON vehicle.id = truck.vehicle_id
         LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
@@ -841,29 +847,35 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       [truckLoadId, product.serial_id, product.serial_no, now],
     );
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_trucks (
-          product_truck_id, serial_id, serial_no, event_type, created_by,
-          user_truck_id, driver_name, truck_id, truck_license_plate,
-          license_plate_province_id, status, truck_load_id, is_dc_mismatch,
-          parcel_to_warehouse_id, truck_to_warehouse_id, created_date
-        )
-        VALUES (?, ?, ?, 'LOAD', ?, ?, ?, ?, ?, ?, 'LOADED', ?, 'N', ?, NULL, ?)
-      `,
-      [productTruckResult.insertId, product.serial_id, product.serial_no, actorId, truck.user_truck_id, truck.driver_name, truck.vehicle_id ?? truck.vehicle_contractor_id, vehicle.license_plate || null, vehicle.license_plate_province_id || null, truckLoadId, product.to_warehouse_id, now],
-    );
+    await insertProductTruckLog(connection, {
+      product_truck_id: productTruckResult.insertId,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "LOAD",
+      created_by: actorId,
+      user_truck_id: truck.user_truck_id,
+      driver_name: truck.driver_name,
+      truck_id: truck.vehicle_id ?? truck.vehicle_contractor_id,
+      truck_license_plate: vehicle.license_plate || null,
+      license_plate_province_id: vehicle.license_plate_province_id || null,
+      status: "LOADED",
+      truck_load_id: truckLoadId,
+      is_dc_mismatch: "N",
+      parcel_to_warehouse_id: product.to_warehouse_id,
+      truck_to_warehouse_id: null,
+      created_date: now,
+    });
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_warehouses (
-          product_warehouse_id, serial_id, serial_no, event_type,
-          now_warehouse_id, to_warehouse_id, created_by, created_date
-        )
-        VALUES (?, ?, ?, 'TRUCK_OUT', ?, ?, ?, ?)
-      `,
-      [product.id, product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, actorId, now],
-    );
+    await insertProductWarehouseLog(connection, {
+      product_warehouse_id: product.id,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "TRUCK_OUT",
+      now_warehouse_id: truck.warehouse_id,
+      to_warehouse_id: product.to_warehouse_id,
+      created_by: actorId,
+      created_date: now,
+    });
 
     await connection.query(`DELETE FROM tm_product_warehouses WHERE id = ?`, [product.id]);
     await syncTruckBoxCount(connection, truckLoadId);
@@ -905,7 +917,7 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
           product_truck.id, product_truck.serial_id, product_truck.serial_no,
           product_truck.resend_date, product_truck.user_truck_id, product_truck.driver_name,
           product_truck.truck_id, product_truck.status, truck.warehouse_id,
-          product_truck.route_id, receive_serial.to_warehouse_id
+          truck.is_close, product_truck.route_id, receive_serial.to_warehouse_id
         FROM tm_product_trucks product_truck
         INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
         LEFT JOIN tm_receive_serials receive_serial
@@ -929,6 +941,12 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบ Serial No ในใบรถกระจาย" });
     }
 
+    if (product.is_close === "Y") {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ใบรถกระจายนี้ปิดบรรทุกแล้ว ไม่สามารถนำสินค้าออกได้" });
+    }
+
     const [warehouseResult] = await connection.query(
       `
         INSERT INTO tm_product_warehouses (
@@ -943,28 +961,33 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
     await connection.query(`DELETE FROM tm_truck_details WHERE truck_load_id = ? AND serial_no = ?`, [truckLoadId, serialNo]);
     await connection.query(`DELETE FROM tm_product_trucks WHERE id = ?`, [product.id]);
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_warehouses (
-          product_warehouse_id, serial_id, serial_no, event_type,
-          now_warehouse_id, to_warehouse_id, created_by, created_date
-        )
-        VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
-      `,
-      [warehouseResult.insertId, product.serial_id, product.serial_no, product.warehouse_id, product.to_warehouse_id, actorId, now],
-    );
+    await insertProductWarehouseLog(connection, {
+      product_warehouse_id: warehouseResult.insertId,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "RETURN_WH",
+      now_warehouse_id: product.warehouse_id,
+      to_warehouse_id: product.to_warehouse_id,
+      created_by: actorId,
+      created_date: now,
+    });
 
-    await connection.query(
-      `
-        INSERT INTO logs_product_trucks (
-          product_truck_id, serial_id, serial_no, event_type, created_by,
-          user_truck_id, driver_name, truck_id, status, truck_load_id, is_dc_mismatch,
-          parcel_to_warehouse_id, truck_to_warehouse_id, created_date
-        )
-        VALUES (?, ?, ?, 'UNLOAD', ?, ?, ?, ?, ?, ?, 'N', ?, NULL, ?)
-      `,
-      [product.id, product.serial_id, product.serial_no, actorId, product.user_truck_id, product.driver_name, product.truck_id, product.status, truckLoadId, product.to_warehouse_id, now],
-    );
+    await insertProductTruckLog(connection, {
+      product_truck_id: product.id,
+      serial_id: product.serial_id,
+      serial_no: product.serial_no,
+      event_type: "UNLOAD",
+      created_by: actorId,
+      user_truck_id: product.user_truck_id,
+      driver_name: product.driver_name,
+      truck_id: product.truck_id,
+      status: product.status,
+      truck_load_id: truckLoadId,
+      is_dc_mismatch: "N",
+      parcel_to_warehouse_id: product.to_warehouse_id,
+      truck_to_warehouse_id: null,
+      created_date: now,
+    });
 
     await syncTruckBoxCount(connection, truckLoadId);
     await connection.commit();
@@ -1060,28 +1083,33 @@ export const deleteDeliveryTruck = async (req, res) => {
         [product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, product.route_id, product.resend_date, actorId, now],
       );
 
-      await connection.query(
-        `
-          INSERT INTO logs_product_warehouses (
-            product_warehouse_id, serial_id, serial_no, event_type,
-            now_warehouse_id, to_warehouse_id, created_by, created_date
-          )
-          VALUES (?, ?, ?, 'RETURN_WH', ?, ?, ?, ?)
-        `,
-        [warehouseResult.insertId, product.serial_id, product.serial_no, truck.warehouse_id, product.to_warehouse_id, actorId, now],
-      );
+      await insertProductWarehouseLog(connection, {
+        product_warehouse_id: warehouseResult.insertId,
+        serial_id: product.serial_id,
+        serial_no: product.serial_no,
+        event_type: "RETURN_WH",
+        now_warehouse_id: truck.warehouse_id,
+        to_warehouse_id: product.to_warehouse_id,
+        created_by: actorId,
+        created_date: now,
+      });
 
-      await connection.query(
-        `
-          INSERT INTO logs_product_trucks (
-            product_truck_id, serial_id, serial_no, event_type, created_by,
-            user_truck_id, driver_name, truck_id, status, truck_load_id,
-            is_dc_mismatch, parcel_to_warehouse_id, truck_to_warehouse_id, created_date
-          )
-          VALUES (?, ?, ?, 'UNLOAD', ?, ?, ?, ?, ?, ?, 'N', ?, NULL, ?)
-        `,
-        [product.id, product.serial_id, product.serial_no, actorId, product.user_truck_id, product.driver_name, product.truck_id, product.status, truckLoadId, product.to_warehouse_id, now],
-      );
+      await insertProductTruckLog(connection, {
+        product_truck_id: product.id,
+        serial_id: product.serial_id,
+        serial_no: product.serial_no,
+        event_type: "UNLOAD",
+        created_by: actorId,
+        user_truck_id: product.user_truck_id,
+        driver_name: product.driver_name,
+        truck_id: product.truck_id,
+        status: product.status,
+        truck_load_id: truckLoadId,
+        is_dc_mismatch: "N",
+        parcel_to_warehouse_id: product.to_warehouse_id,
+        truck_to_warehouse_id: null,
+        created_date: now,
+      });
     }
 
     await connection.query(`DELETE FROM tm_truck_details WHERE truck_load_id = ?`, [truckLoadId]);

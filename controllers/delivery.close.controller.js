@@ -8,15 +8,6 @@ import { getPositiveInteger } from "../utils/pagination.js";
 
 const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads");
 
-const uniqueMedia = (media) => {
-  const paths = new Set();
-  return media.filter((item) => {
-    if (paths.has(item.preview)) return false;
-    paths.add(item.preview);
-    return true;
-  });
-};
-
 const getBillStatus = (items) => {
   if (!items.length) return "PENDING_CLOSE";
 
@@ -48,6 +39,22 @@ const currentReceiveSerialSql = `
   )
 `;
 
+const billKey = (receiveBusinessId, receiveWalkinId, receiveCode) => `${receiveBusinessId ?? ""}:${receiveWalkinId ?? ""}:${receiveCode}`;
+
+const getActiveBillMedia = async (connection, bills, lock = false) => {
+  if (!bills.length) return [];
+  const condition = bills.map(() => "(receive_business_id <=> ? AND receive_walkin_id <=> ? AND receive_code = ?)").join(" OR ");
+  const params = bills.flatMap((bill) => [bill.receive_business_id, bill.receive_walkin_id, bill.receive_code]);
+  const [media] = await connection.query(
+    `SELECT delivery_close_media_id, receive_business_id, receive_walkin_id, receive_code, media_type, file_name, file_path
+     FROM tm_delivery_close_media
+     WHERE is_deleted = 0 AND (${condition})
+     ORDER BY delivery_close_media_id${lock ? " FOR UPDATE" : ""}`,
+    params,
+  );
+  return media;
+};
+
 export const getDeliveryCompletes = async (req, res) => {
   try {
     const page = getPositiveInteger(req.query.page, 1, Number.MAX_SAFE_INTEGER);
@@ -64,7 +71,7 @@ export const getDeliveryCompletes = async (req, res) => {
     const searchParams = search ? [`%${search}%`] : [];
     const billIsRelevantSql = `(
       EXISTS (SELECT 1 FROM tm_product_actived active WHERE active.serial_id = rs.serial_id)
-      OR EXISTS (SELECT 1 FROM tm_delivery_statuses status WHERE status.serial_id = rs.serial_id)
+      OR EXISTS (SELECT 1 FROM tm_delivery_close status WHERE status.serial_id = rs.serial_id)
     )`;
     const offset = (page - 1) * limit;
 
@@ -124,55 +131,45 @@ export const getDeliveryCompletes = async (req, res) => {
           delivery_status.status_note,
           delivery_status.delivered_datetime
         FROM tm_receive_serials rs
-        LEFT JOIN tm_delivery_statuses delivery_status ON delivery_status.serial_id = rs.serial_id
+        LEFT JOIN tm_delivery_close delivery_status ON delivery_status.serial_id = rs.serial_id
         WHERE ${currentReceiveSerialSql} AND (${billCondition})
         ORDER BY rs.receive_code, rs.serial_no
       `,
       billParams,
     );
 
-    const statusIds = [...new Set(itemRows.map((item) => item.delivery_status_id).filter(Boolean))];
-    const [mediaRows] = statusIds.length
-      ? await db.query(
-          `
-          SELECT delivery_status_id, media_type, file_name, file_path
-          FROM tm_delivery_status_media
-          WHERE delivery_status_id IN (${statusIds.map(() => "?").join(", ")})
-          ORDER BY delivery_status_media_id
-        `,
-          statusIds,
-        )
-      : [[]];
-    const mediaByStatusId = new Map();
-    for (const media of mediaRows) {
-      const statusMedia = mediaByStatusId.get(media.delivery_status_id) || [];
-      statusMedia.push({ name: media.file_name, preview: media.file_path, media_type: media.media_type });
-      mediaByStatusId.set(media.delivery_status_id, statusMedia);
+    const billMediaRows = await getActiveBillMedia(db, billRows);
+    const mediaByBillKey = new Map();
+    for (const media of billMediaRows) {
+      const key = billKey(media.receive_business_id, media.receive_walkin_id, media.receive_code);
+      const items = mediaByBillKey.get(key) || [];
+      items.push({ id: media.delivery_close_media_id, name: media.file_name, preview: media.file_path, media_type: media.media_type });
+      mediaByBillKey.set(key, items);
     }
 
     const itemsByBillKey = new Map();
     for (const item of itemRows) {
-      item.media = mediaByStatusId.get(item.delivery_status_id) || [];
-      const billKey = `${item.receive_business_id ?? ""}:${item.receive_walkin_id ?? ""}:${item.receive_code}`;
-      const items = itemsByBillKey.get(billKey) || [];
+      const key = billKey(item.receive_business_id, item.receive_walkin_id, item.receive_code);
+      const items = itemsByBillKey.get(key) || [];
       items.push(item);
-      itemsByBillKey.set(billKey, items);
+      itemsByBillKey.set(key, items);
     }
 
     const data = billRows.map((bill) => {
-      const billKey = `${bill.receive_business_id ?? ""}:${bill.receive_walkin_id ?? ""}:${bill.receive_code}`;
-      const items = itemsByBillKey.get(billKey) || [];
+      const key = billKey(bill.receive_business_id, bill.receive_walkin_id, bill.receive_code);
+      const items = itemsByBillKey.get(key) || [];
+      const billMedia = mediaByBillKey.get(key) || [];
       const deliveredItems = items.filter((item) => item.delivery_status === "COMPLETED");
       const postponedItem = items.find((item) => item.delivery_status === "POSTPONED");
-      const proofImages = uniqueMedia(items.flatMap((item) => item.media.filter((media) => media.media_type === "PROOF_IMAGE")));
-      const signatureImages = uniqueMedia(items.flatMap((item) => item.media.filter((media) => media.media_type === "SIGNATURE_IMAGE")));
-      const postponeImages = uniqueMedia(items.flatMap((item) => item.media.filter((media) => media.media_type === "POSTPONE_IMAGE")));
+      const proofImages = billMedia.filter((media) => media.media_type === "PROOF_IMAGE");
+      const signatureImages = billMedia.filter((media) => media.media_type === "SIGNATURE_IMAGE");
+      const postponeImages = [];
       const latestCompletedItem = deliveredItems
         .filter((item) => item.delivered_datetime)
         .sort((left, right) => new Date(right.delivered_datetime) - new Date(left.delivered_datetime))[0];
 
       return {
-        id: billKey,
+        id: key,
         receive_business_id: bill.receive_business_id,
         receive_walkin_id: bill.receive_walkin_id,
         truck_code: "-",
@@ -233,6 +230,13 @@ const fileExtension = (file) => {
 
 const uploadedFiles = (req, field) => (Array.isArray(req.files?.[field]) ? req.files[field] : []);
 const shortFileName = (file) => `${randomUUID().replace(/-/g, "").slice(0, 16)}${fileExtension(file)}`;
+const displayFileName = (file, fallback) => {
+  const name = String(file.originalname || "")
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, "_")
+    .trim()
+    .slice(0, 255);
+  return name || fallback;
+};
 const receiveFolderName = (value) =>
   String(value || "")
     .replace(/[^a-zA-Z0-9]/g, "")
@@ -261,8 +265,8 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     const proofFiles = uploadedFiles(req, "proof_images");
     const signFiles = uploadedFiles(req, "sign_images");
 
-    if (!warehouseId || !actorId || !receiveCode || !safeReceiveCode || !serialIds.length || !proofFiles.length || !signFiles.length) {
-      return res.status(400).json({ success: false, message: "กรุณาเลือก SN พร้อมรูปหลักฐานและลายเซ็น" });
+    if (!warehouseId || !actorId || !receiveCode || !safeReceiveCode || !serialIds.length) {
+      return res.status(400).json({ success: false, message: "กรุณาเลือก SN ที่จัดส่งสำเร็จ" });
     }
     if (lat === undefined || lng === undefined || accuracyM === undefined)
       return res.status(400).json({ success: false, message: "พิกัดไม่ถูกต้อง" });
@@ -283,6 +287,28 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       return res.status(400).json({ success: false, message: "พบ SN ที่ไม่อยู่ในบิลนี้หรือไม่ได้อยู่ในรายการ active" });
     }
 
+    const bill = {
+      receive_business_id: products[0].receive_business_id,
+      receive_walkin_id: products[0].receive_walkin_id,
+      receive_code: receiveCode,
+    };
+    if (products.some((product) => product.receive_business_id !== bill.receive_business_id || product.receive_walkin_id !== bill.receive_walkin_id)) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "SN ที่เลือกต้องอยู่ในบิลเดียวกัน" });
+    }
+
+    const existingMedia = await getActiveBillMedia(connection, [bill], true);
+    const existingProofCount = existingMedia.filter((media) => media.media_type === "PROOF_IMAGE").length;
+    const existingSignatureCount = existingMedia.filter((media) => media.media_type === "SIGNATURE_IMAGE").length;
+    if (existingProofCount + proofFiles.length > 8 || existingSignatureCount + signFiles.length > 4) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "รูปหลักฐานเกิน 8 รูป หรือลายเซ็นเกิน 4 รูป" });
+    }
+    if (existingProofCount + proofFiles.length < 1 || existingSignatureCount + signFiles.length < 1) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "กรุณาเพิ่มรูปหลักฐานและลายเซ็นอย่างน้อยอย่างละ 1 รูป" });
+    }
+
     const [lastTransactions] = await connection.query(
       `SELECT serial_id FROM tm_product_transactions_last WHERE serial_id IN (${placeholders}) FOR UPDATE`,
       serialIds,
@@ -295,15 +321,13 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     const now = new Date();
     for (const product of products) {
       await connection.query(
-        `INSERT INTO tm_delivery_statuses (truck_load_id, serial_id, serial_no, delivery_status, delivered_datetime, source, lat, lng, accuracy_m, created_by, created_date, updated_by, updated_date)
+        `INSERT INTO tm_delivery_close (truck_load_id, serial_id, serial_no, delivery_status, delivered_datetime, source, lat, lng, accuracy_m, created_by, created_date, updated_by, updated_date)
          VALUES (NULL, ?, ?, 'COMPLETED', ?, 'WEB_ADMIN', ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE truck_load_id = NULL, delivery_status = 'COMPLETED', delivered_datetime = VALUES(delivered_datetime), source = 'WEB_ADMIN', lat = VALUES(lat), lng = VALUES(lng), accuracy_m = VALUES(accuracy_m), updated_by = VALUES(updated_by), updated_date = VALUES(updated_date)`,
         [product.serial_id, product.serial_no, deliveredAt, lat, lng, accuracyM, actorId, now, actorId, now],
       );
     }
 
-    const [statuses] = await connection.query(`SELECT delivery_status_id FROM tm_delivery_statuses WHERE serial_id IN (${placeholders})`, serialIds);
-    if (statuses.length !== serialIds.length) throw new Error("delivery status rows are incomplete");
     const mediaGroups = [
       { type: "PROOF_IMAGE", folder: "proof", files: proofFiles },
       { type: "SIGNATURE_IMAGE", folder: "signature", files: signFiles },
@@ -312,18 +336,20 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       for (const file of group.files) {
         const relativeDirectory = path.posix.join("delivery-closes", safeReceiveCode, group.folder);
         const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
-        const name = shortFileName(file);
-        const absolutePath = path.join(absoluteDirectory, name);
-        const filePath = `/uploads/${relativeDirectory}/${name}`;
+        const storedName = shortFileName(file);
+        const originalName = displayFileName(file, storedName);
+        const absolutePath = path.join(absoluteDirectory, storedName);
+        const filePath = `/uploads/${relativeDirectory}/${storedName}`;
         await fs.mkdir(absoluteDirectory, { recursive: true });
         await fs.writeFile(absolutePath, file.buffer);
         createdFiles.push(absolutePath);
-        for (const status of statuses)
-          await connection.query(
-            `INSERT INTO tm_delivery_status_media (delivery_status_id, media_type, file_name, file_path, mime_type, file_size, created_by, created_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [status.delivery_status_id, group.type, name, filePath, file.mimetype, file.size, actorId, now],
-          );
+        await connection.query(
+          `INSERT INTO tm_delivery_close_media (
+             receive_business_id, receive_walkin_id, receive_code, media_type,
+             file_name, file_path, mime_type, file_size, is_deleted, created_by, created_date
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          [bill.receive_business_id, bill.receive_walkin_id, receiveCode, group.type, originalName, filePath, file.mimetype, file.size, actorId, now],
+        );
       }
     }
 
@@ -369,12 +395,77 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     await connection.query(`DELETE FROM tm_product_actived WHERE serial_id IN (${placeholders})`, serialIds);
 
     await connection.commit();
-    return res.status(200).json({ success: true, message: "บันทึกผลจัดส่งสำเร็จ", data: { receive_code: receiveCode, serial_ids: serialIds } });
+    const activeMedia = await getActiveBillMedia(connection, [bill]);
+    return res.status(200).json({
+      success: true,
+      message: "บันทึกผลจัดส่งสำเร็จ",
+      data: {
+        receive_code: receiveCode,
+        serial_ids: serialIds,
+        proof_images: activeMedia.filter((media) => media.media_type === "PROOF_IMAGE").map((media) => ({ id: media.delivery_close_media_id, name: media.file_name, preview: media.file_path })),
+        signature_images: activeMedia.filter((media) => media.media_type === "SIGNATURE_IMAGE").map((media) => ({ id: media.delivery_close_media_id, name: media.file_name, preview: media.file_path })),
+      },
+    });
   } catch (error) {
     await connection?.rollback();
     await Promise.all(createdFiles.map((filePath) => fs.unlink(filePath).catch(() => undefined)));
     console.error("saveDeliveryCompleteStatuses error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถบันทึกผลจัดส่งได้" });
+  } finally {
+    connection?.release();
+  }
+};
+
+export const softDeleteDeliveryCloseMedia = async (req, res) => {
+  let connection;
+  try {
+    const actorId = toNumberOrNull(req.user?.id ?? req.user?.user_id);
+    const mediaId = toNumberOrNull(req.params.mediaId);
+    const receiveCode = cleanDbText(req.body?.receive_code)?.slice(0, 50) || "";
+    const now = new Date();
+    if (!actorId || !mediaId || !receiveCode) return res.status(400).json({ success: false, message: "ข้อมูลรูปไม่ถูกต้อง" });
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    const [mediaRows] = await connection.query(
+      `SELECT receive_business_id, receive_walkin_id
+       FROM tm_delivery_close_media
+       WHERE delivery_close_media_id = ? AND receive_code = ? AND is_deleted = 0
+       FOR UPDATE`,
+      [mediaId, receiveCode],
+    );
+    if (!mediaRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "ไม่พบรูปที่ต้องการลบ" });
+    }
+    const media = mediaRows[0];
+    const [activeRows] = await connection.query(
+      `SELECT 1
+       FROM tm_product_actived active
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
+       WHERE ${currentReceiveSerialSql}
+         AND rs.receive_business_id <=> ?
+         AND rs.receive_walkin_id <=> ?
+         AND rs.receive_code = ?
+       LIMIT 1`,
+      [media.receive_business_id, media.receive_walkin_id, receiveCode],
+    );
+    if (!activeRows.length) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "บิลปิดงานสมบูรณ์แล้ว กรุณาแก้ไขจากหน้าจัดการหลักฐาน" });
+    }
+    const [result] = await connection.query(
+      `UPDATE tm_delivery_close_media
+       SET is_deleted = 1, deleted_by = ?, deleted_date = ?
+       WHERE delivery_close_media_id = ? AND receive_code = ? AND is_deleted = 0`,
+      [actorId, now, mediaId, receiveCode],
+    );
+    await connection.commit();
+    return res.status(200).json({ success: true, message: "ลบรูปออกจากรายการแล้ว" });
+  } catch (error) {
+    await connection?.rollback();
+    console.error("softDeleteDeliveryCloseMedia error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถลบรูปได้" });
   } finally {
     connection?.release();
   }

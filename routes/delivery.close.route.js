@@ -1,7 +1,7 @@
 import express from "express";
 import multer from "multer";
 
-import { getDeliveryCompletes, saveDeliveryCompleteStatuses } from "../controllers/delivery.close.controller.js";
+import { getDeliveryCompletes, saveDeliveryCompleteStatuses, softDeleteDeliveryCloseMedia } from "../controllers/delivery.close.controller.js";
 import { auth } from "../middlewares/auth.js";
 
 const router = express.Router();
@@ -24,9 +24,10 @@ router.post(
   auth,
   uploadDeliveryMedia.fields([
     { name: "proof_images", maxCount: 8 },
-    { name: "sign_images", maxCount: 1 },
+    { name: "sign_images", maxCount: 4 },
   ]),
   saveDeliveryCompleteStatuses,
 );
+router.delete("/media/:mediaId", auth, softDeleteDeliveryCloseMedia);
 
 export default router;

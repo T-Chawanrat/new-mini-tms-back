@@ -24,8 +24,8 @@ export const getDeliveryIssueThreads = async (req, res) => {
          MAX(message.created_date) AS updated_at,
          SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(NULLIF(message.message_text, ''), 'แนบรูปภาพ') ORDER BY message.created_date DESC SEPARATOR '\u001f'), '\u001f', 1) AS last_message,
          SUM(CASE WHEN message.sender_user_id <> ? AND message_read.delivery_status_message_id IS NULL THEN 1 ELSE 0 END) AS unread_count
-       FROM tm_delivery_status_messages message
-       LEFT JOIN tm_delivery_status_message_reads message_read
+       FROM tm_delivery_messages message
+       LEFT JOIN tm_delivery_message_reads message_read
          ON message_read.delivery_status_message_id = message.delivery_status_message_id AND message_read.user_id = ?
        WHERE message.receive_code IS NOT NULL AND TRIM(message.receive_code) <> ''
        GROUP BY message.receive_code
@@ -54,7 +54,7 @@ export const getDeliveryIssueMessages = async (req, res) => {
     const [messages] = await db.query(
       `SELECT message.delivery_status_message_id, message.sender_user_id, message.message_text, message.created_date,
               TRIM(CONCAT_WS(' ', NULLIF(sender.first_name, ''), NULLIF(sender.last_name, ''))) AS sender_name, sender.username
-       FROM tm_delivery_status_messages message
+       FROM tm_delivery_messages message
        LEFT JOIN um_users sender ON sender.id = message.sender_user_id
        WHERE message.receive_code = ?
        ORDER BY message.created_date, message.delivery_status_message_id`,
@@ -63,7 +63,7 @@ export const getDeliveryIssueMessages = async (req, res) => {
     const ids = messages.map((message) => message.delivery_status_message_id);
     const [media] = ids.length
       ? await db.query(
-          `SELECT delivery_status_message_id, file_name, file_path, mime_type FROM tm_delivery_status_message_media WHERE delivery_status_message_id IN (${ids.map(() => "?").join(", ")}) ORDER BY delivery_status_message_media_id`,
+          `SELECT delivery_status_message_id, file_name, file_path, mime_type FROM tm_delivery_message_media WHERE delivery_status_message_id IN (${ids.map(() => "?").join(", ")}) ORDER BY delivery_status_message_media_id`,
           ids,
         )
       : [[]];
@@ -72,8 +72,8 @@ export const getDeliveryIssueMessages = async (req, res) => {
       mediaByMessage.set(item.delivery_status_message_id, [...(mediaByMessage.get(item.delivery_status_message_id) || []), item]);
     if (ids.length) {
       await db.query(
-        `INSERT IGNORE INTO tm_delivery_status_message_reads (delivery_status_message_id, user_id, read_date)
-         SELECT delivery_status_message_id, ?, ? FROM tm_delivery_status_messages WHERE receive_code = ? AND sender_user_id <> ?`,
+        `INSERT IGNORE INTO tm_delivery_message_reads (delivery_status_message_id, user_id, read_date)
+         SELECT delivery_status_message_id, ?, ? FROM tm_delivery_messages WHERE receive_code = ? AND sender_user_id <> ?`,
         [actorId, now, receiveCode, actorId],
       );
     }
@@ -113,7 +113,7 @@ export const createDeliveryIssueMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบเลขที่บิล" });
     }
     const [result] = await connection.query(
-      `INSERT INTO tm_delivery_status_messages (truck_load_id, receive_code, delivery_status_id, sender_user_id, message_text, created_date) VALUES (NULL, ?, NULL, ?, ?, ?)`,
+      `INSERT INTO tm_delivery_messages (truck_load_id, receive_code, delivery_status_id, sender_user_id, message_text, created_date) VALUES (NULL, ?, NULL, ?, ?, ?)`,
       [receiveCode, actorId, messageText, now],
     );
     const messageId = result.insertId;
@@ -127,7 +127,7 @@ export const createDeliveryIssueMessage = async (req, res) => {
       await fs.writeFile(absolutePath, file.buffer);
       createdFiles.push(absolutePath);
       await connection.query(
-        `INSERT INTO tm_delivery_status_message_media (delivery_status_message_id, file_name, file_path, mime_type, file_size, created_by, created_date) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tm_delivery_message_media (delivery_status_message_id, file_name, file_path, mime_type, file_size, created_by, created_date) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [messageId, fileName, filePath, file.mimetype, file.size, actorId, now],
       );
     }

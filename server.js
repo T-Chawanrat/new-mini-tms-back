@@ -29,6 +29,7 @@ import contractorRoutes from "./routes/contractor.routes.js";
 import driverAuthRoute from "./routes/auth.driver.routes.js";
 import deliveryTruckRoutes from "./routes/delivery.truck.route.js";
 import deliveryCloseRoutes from "./routes/delivery.close.route.js";
+import deliveryCloseMediaRoutes from "./routes/delivery.close.media.route.js";
 import deliveryPendingReportRoutes from "./routes/delivery.pending.report.route.js";
 import deliveryIssueRoutes from "./routes/delivery.issue.route.js";
 
@@ -67,6 +68,7 @@ app.use("/product-trucks", productTruckRoutes);
 app.use("/truck-loads", truckLoadRoutes);
 app.use("/delivery-trucks", deliveryTruckRoutes);
 app.use("/delivery-closes", deliveryCloseRoutes);
+app.use("/delivery-close-media", deliveryCloseMediaRoutes);
 app.use("/delivery-reports", deliveryPendingReportRoutes);
 app.use("/delivery-issues", deliveryIssueRoutes);
 app.use("/dc-receives", dcReceiveRoutes);

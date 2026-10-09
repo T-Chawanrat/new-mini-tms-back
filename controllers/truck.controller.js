@@ -17,6 +17,7 @@ const truckVehicleSql = buildTruckVehicleSql({
   contractorProvinceAlias: "contractor_plate_province",
 });
 
+
 const createTruckCode = async (connection, now) => {
   const dateParts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",

@@ -23,6 +23,7 @@ export const driverLogin = async (req, res) => {
           app_user.first_name,
           app_user.last_name,
           app_user.role_id,
+          COALESCE(app_user.employment_type, 'EMPLOYEE') AS employment_type,
           app_user.customer_id,
           app_user.license_no,
           app_user.license_expire,
@@ -76,6 +77,7 @@ export const driverLogin = async (req, res) => {
       {
         id: user.id,
         role_id: user.role_id,
+        employment_type: user.employment_type,
         customer_id: user.customer_id,
         warehouse_id: user.warehouse_id,
         purpose: "ACCESS",

@@ -274,6 +274,88 @@ export const getDeliveryTruckOptions = async (req, res) => {
   }
 };
 
+export const getDriverDeliveryTruckOptions = async (req, res) => {
+  try {
+    const driverId = getActorId(req);
+    const warehouseId = getWarehouseId(req);
+
+    if (!driverId || !warehouseId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลผู้ขับรถหรือคลังไม่ถูกต้อง" });
+    }
+
+    const [[driverRows], [routeRows]] = await Promise.all([
+      db.query(
+        `
+          SELECT id, role_id, COALESCE(employment_type, 'EMPLOYEE') AS employment_type
+          FROM um_users
+          WHERE id = ?
+            AND role_id IN (1, 7)
+            AND COALESCE(is_active, 1) = 1
+          LIMIT 1
+        `,
+        [driverId],
+      ),
+      db.query(
+        `
+          SELECT route_id, warehouse_id, route_code, route_name
+          FROM mm_routes
+          WHERE warehouse_id = ?
+            AND COALESCE(is_deleted, 'N') = 'N'
+          ORDER BY route_code, route_name
+        `,
+        [warehouseId],
+      ),
+    ]);
+
+    const driver = driverRows[0];
+    if (!driver) {
+      return res.status(403).json({ success: false, message: "บัญชีนี้ไม่มีสิทธิ์สร้างใบรถในฐานะคนขับ" });
+    }
+
+    const driverType = Number(driver.role_id) === 1 ? "EMPLOYEE" : driver.employment_type === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE";
+    const [vehicleRows] = await db.query(
+      driverType === "CONTRACTOR"
+        ? `
+            SELECT vehicle.id AS vehicle_contractor_id, vehicle.license_plate,
+              province.province_name AS license_plate_province, vehicle.model
+            FROM mm_vehicles_contractor vehicle
+            LEFT JOIN mm_province province ON province.id = vehicle.license_plate_province_id
+            WHERE vehicle.user_truck_id = ?
+              AND vehicle.is_deleted = 'N'
+            ORDER BY vehicle.id
+          `
+        : `
+            SELECT id, license_plate, license_plate_province, model
+            FROM mm_vehicles
+            WHERE status = 'ACTIVE'
+              AND is_deleted = 'N'
+            ORDER BY license_plate
+          `,
+      driverType === "CONTRACTOR" ? [driverId] : [],
+    );
+
+    if (driverType === "CONTRACTOR" && vehicleRows.length !== 1) {
+      return res.status(409).json({
+        success: false,
+        message: vehicleRows.length ? "พบรถที่ผูกกับคนขับมากกว่าหนึ่งคัน กรุณาให้ผู้ดูแลตรวจสอบข้อมูล" : "ไม่พบรถที่ผูกกับคนขับรายนี้",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        driver_type: driverType,
+        routes: routeRows,
+        vehicles: driverType === "EMPLOYEE" ? vehicleRows : [],
+        contractor_vehicle: driverType === "CONTRACTOR" ? vehicleRows[0] : null,
+      },
+    });
+  } catch (error) {
+    console.error("getDriverDeliveryTruckOptions error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดข้อมูลสำหรับสร้างใบรถได้" });
+  }
+};
+
 export const getDeliveryTrucks = async (req, res) => {
   try {
     const warehouseId = getWarehouseId(req);
@@ -329,6 +411,50 @@ export const getDeliveryTrucks = async (req, res) => {
   } catch (error) {
     console.error("getDeliveryTrucks error:", error);
     res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการใบรถกระจายได้" });
+  }
+};
+
+export const getDriverDeliveryTrucks = async (req, res) => {
+  try {
+    const driverId = getActorId(req);
+
+    if (!driverId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลผู้ขับรถไม่ถูกต้อง" });
+    }
+
+    const [rows] = await db.query(
+      `
+        SELECT
+          truck.id AS truck_load_id,
+          truck.truck_code,
+          truck.create_date,
+          truck.status,
+          truck.is_close,
+          truck.is_go,
+          truck.is_completed,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_plate_province,
+          route.route_code,
+          route.route_name,
+          COALESCE(truck_count.count_box, 0) AS count_box
+        FROM tm_trucks truck
+        LEFT JOIN mm_vehicles vehicle ON vehicle.id = truck.vehicle_id
+        LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
+        LEFT JOIN mm_province contractor_province ON contractor_province.id = contractor_vehicle.license_plate_province_id
+        LEFT JOIN tm_truck_count truck_count ON truck_count.truck_load_id = truck.id
+        LEFT JOIN mm_routes route ON route.route_id = truck.route_id
+        WHERE truck.status IN ('DC_TRUCK', 'DC_TRUCK_DC')
+          AND truck.user_truck_id = ?
+          AND COALESCE(truck.is_deleted, 'N') = 'N'
+        ORDER BY truck.id DESC
+      `,
+      [driverId],
+    );
+
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("getDriverDeliveryTrucks error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดงานของคุณได้" });
   }
 };
 
@@ -398,7 +524,7 @@ export const getDeliveryTruckProducts = async (req, res) => {
 
     const [truckRows] = await db.query(
       `
-        SELECT warehouse_id
+        SELECT warehouse_id, route_id
         FROM tm_trucks
         WHERE id = ?
           AND status = 'DC_TRUCK'
@@ -437,10 +563,11 @@ export const getDeliveryTruckProducts = async (req, res) => {
           ON customer.id = receive_serial.customer_id
         WHERE product_warehouse.now_warehouse_id = ?
           AND product_warehouse.to_warehouse_id = ?
+          AND product_warehouse.route_id = ?
           AND NULLIF(TRIM(product_warehouse.serial_no), '') IS NOT NULL
         ORDER BY product_warehouse.id ASC
       `,
-      [truck.warehouse_id, truck.warehouse_id],
+      [truck.warehouse_id, truck.warehouse_id, truck.route_id],
     );
 
     const [loadedRows] = await db.query(
@@ -1253,6 +1380,147 @@ export const createDeliveryTruck = async (req, res) => {
     if (connection && transactionStarted) await connection.rollback();
     console.error("createDeliveryTruck error:", error);
     res.status(500).json({ success: false, message: "ไม่สามารถสร้างใบรถกระจายได้" });
+  } finally {
+    connection?.release();
+  }
+};
+
+export const createDriverDeliveryTruck = async (req, res) => {
+  let connection;
+  let transactionStarted = false;
+
+  try {
+    const driverId = getActorId(req);
+    const warehouseId = getWarehouseId(req);
+    const routeId = toNumberOrNull(req.body.route_id);
+    const vehicleId = toNumberOrNull(req.body.vehicle_id);
+
+    if (!driverId || !warehouseId || !routeId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลผู้ขับรถ คลัง หรือสายรถไม่ถูกต้อง" });
+    }
+
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    const [driverRows] = await connection.query(
+      `
+        SELECT id, role_id, first_name, last_name, COALESCE(employment_type, 'EMPLOYEE') AS employment_type
+        FROM um_users
+        WHERE id = ?
+          AND role_id IN (1, 7)
+          AND COALESCE(is_active, 1) = 1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [driverId],
+    );
+    const driver = driverRows[0];
+
+    if (!driver) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(403).json({ success: false, message: "บัญชีนี้ไม่มีสิทธิ์สร้างใบรถในฐานะคนขับ" });
+    }
+
+    const driverType = Number(driver.role_id) === 1 ? "EMPLOYEE" : driver.employment_type === "CONTRACTOR" ? "CONTRACTOR" : "EMPLOYEE";
+    if (driverType === "EMPLOYEE" && !vehicleId) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ success: false, message: "กรุณาเลือกรถ" });
+    }
+
+    const [vehicleRows] = await connection.query(
+      driverType === "CONTRACTOR"
+        ? `
+            SELECT id
+            FROM mm_vehicles_contractor
+            WHERE user_truck_id = ?
+              AND is_deleted = 'N'
+            ORDER BY id
+            LIMIT 2
+            FOR UPDATE
+          `
+        : `
+            SELECT id
+            FROM mm_vehicles
+            WHERE id = ?
+              AND status = 'ACTIVE'
+              AND is_deleted = 'N'
+            LIMIT 1
+          `,
+      driverType === "CONTRACTOR" ? [driverId] : [vehicleId],
+    );
+
+    if (!vehicleRows.length || (driverType === "CONTRACTOR" && vehicleRows.length !== 1)) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({
+        success: false,
+        message: driverType === "CONTRACTOR" ? "ไม่พบรถที่ผูกกับคนขับเพียงหนึ่งคัน" : "ไม่พบรถที่เลือกหรือรถไม่พร้อมใช้งาน",
+      });
+    }
+
+    const [routeRows] = await connection.query(
+      `
+        SELECT route_id
+        FROM mm_routes
+        WHERE route_id = ?
+          AND warehouse_id = ?
+          AND COALESCE(is_deleted, 'N') = 'N'
+        LIMIT 1
+      `,
+      [routeId, warehouseId],
+    );
+
+    if (!routeRows.length) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ success: false, message: "ไม่พบสายรถที่เลือกในคลังของคุณ" });
+    }
+
+    const now = new Date();
+    const truckCode = await createTemporaryTruckCode(connection, now);
+    const driverName = [driver.first_name, driver.last_name].filter(Boolean).join(" ") || null;
+    const contractorVehicleId = driverType === "CONTRACTOR" ? vehicleRows[0].id : null;
+
+    const [result] = await connection.query(
+      `
+        INSERT INTO tm_trucks (
+          truck_code, create_date, created_by, user_truck_id,
+          driver_type, driver_name, vehicle_id, vehicle_contractor_id,
+          status, warehouse_id, route_id, note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DC_TRUCK', ?, ?, ?)
+      `,
+      [
+        truckCode,
+        now,
+        driverId,
+        driverId,
+        driverType,
+        driverName,
+        driverType === "EMPLOYEE" ? vehicleId : null,
+        contractorVehicleId,
+        warehouseId,
+        routeId,
+        cleanDbText(req.body.note),
+      ],
+    );
+
+    await syncTruckBoxCount(connection, result.insertId);
+    await connection.commit();
+    transactionStarted = false;
+
+    return res.status(201).json({
+      success: true,
+      message: "สร้างใบรถกระจายสำเร็จ",
+      data: { truck_load_id: result.insertId, truck_code: truckCode },
+    });
+  } catch (error) {
+    if (connection && transactionStarted) await connection.rollback();
+    console.error("createDriverDeliveryTruck error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถสร้างใบรถกระจายได้" });
   } finally {
     connection?.release();
   }

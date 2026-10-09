@@ -1,0 +1,132 @@
+import db from "../../config/db.js";
+import { toNumberOrNull } from "../../utils/input.js";
+import { getPositiveInteger } from "../../utils/pagination.js";
+import { buildTruckVehicleSql } from "../../utils/truck.js";
+
+const truckVehicleSql = buildTruckVehicleSql();
+
+export const getProductTrucks = async (req, res) => {
+  try {
+    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
+
+    if (!warehouseId) {
+      return res.status(400).json({ success: false, message: "ไม่พบคลังของผู้ใช้งาน" });
+    }
+
+    const page = getPositiveInteger(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+    const limit = getPositiveInteger(req.query.limit, 100, 100);
+    const offset = (page - 1) * limit;
+    const search = String(req.query.search || "").trim().slice(0, 200);
+    const exportAll = req.query.export === "1";
+    const requestedTruckType = String(req.query.truck_type || "").trim().toUpperCase();
+    const truckType = ["DC_TRUCK", "DC_TRUCK_DC"].includes(requestedTruckType) ? requestedTruckType : null;
+    const searchValue = `%${search}%`;
+    const searchConditions = search
+      ? `
+          AND (
+            product_truck.serial_id LIKE ? OR product_truck.serial_no LIKE ?
+            OR receive_serial.receive_code LIKE ? OR customer.name LIKE ?
+            OR truck.truck_code LIKE ?
+            OR COALESCE(NULLIF(product_truck.driver_name, ''), TRIM(CONCAT_WS(' ', driver.first_name, driver.last_name))) LIKE ?
+            OR driver.username LIKE ?
+            OR ${truckVehicleSql.licensePlate} LIKE ?
+            OR ${truckVehicleSql.licenseProvince} LIKE ?
+            OR ${truckVehicleSql.model} LIKE ?
+            OR truck.driver_type LIKE ?
+            OR warehouse_from.warehouse_name LIKE ? OR warehouse_to.warehouse_name LIKE ?
+            OR route.route_code LIKE ? OR route.route_name LIKE ?
+            OR product_truck.status LIKE ? OR truck.status LIKE ?
+            OR TRIM(CONCAT_WS(' ', creator.first_name, creator.last_name)) LIKE ?
+          )`
+      : "";
+    const searchParams = search ? Array(18).fill(searchValue) : [];
+    const truckTypeCondition = truckType ? "AND truck.status = ?" : "";
+
+    const fromAndWhere = `
+      FROM tm_product_trucks product_truck
+      INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
+      LEFT JOIN um_users driver ON driver.id = product_truck.user_truck_id
+      LEFT JOIN um_users creator ON creator.id = product_truck.created_by
+      LEFT JOIN tm_receive_serials receive_serial
+        ON receive_serial.serial_id = product_truck.serial_id
+        AND receive_serial.serial_no = product_truck.serial_no
+      LEFT JOIN mm_customers customer ON customer.id = receive_serial.customer_id
+      LEFT JOIN mm_vehicles vehicle ON vehicle.id = product_truck.truck_id
+      LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
+      LEFT JOIN mm_province contractor_province ON contractor_province.id = contractor_vehicle.license_plate_province_id
+      LEFT JOIN mm_warehouses_to warehouse_from ON warehouse_from.warehouse_id = truck.warehouse_id
+      LEFT JOIN mm_warehouses_to warehouse_to ON warehouse_to.warehouse_id = truck.to_warehouse_id
+      LEFT JOIN mm_routes route ON route.route_id = truck.route_id
+      WHERE COALESCE(truck.is_deleted, 'N') = 'N'
+        AND product_truck.status IN ('LOADED', 'DELIVERING')
+        AND truck.warehouse_id = ?
+        ${truckTypeCondition}
+        ${searchConditions}
+    `;
+    const baseParams = [warehouseId, ...(truckType ? [truckType] : []), ...searchParams];
+
+    const [summaryRows] = await db.query(
+      `SELECT COUNT(*) AS total_items ${fromAndWhere}`,
+      baseParams,
+    );
+
+    const paginationSql = exportAll ? "" : "LIMIT ? OFFSET ?";
+    const paginationParams = exportAll ? [] : [limit, offset];
+    const [rows] = await db.query(
+      `
+        SELECT
+          product_truck.id AS product_truck_id,
+          product_truck.serial_id,
+          product_truck.serial_no,
+          product_truck.created_by,
+          product_truck.user_truck_id,
+          product_truck.truck_id,
+          product_truck.status AS product_status,
+          product_truck.resend_date,
+          product_truck.truck_load_id,
+          product_truck.created_date,
+          receive_serial.receive_code,
+          receive_serial.customer_id,
+          customer.name AS customer_name,
+          truck.truck_code,
+          truck.create_date AS truck_create_date,
+          truck.driver_type,
+          truck.status AS truck_status,
+          truck.warehouse_id,
+          truck.to_warehouse_id,
+          route.route_code,
+          route.route_name,
+          truck.is_close,
+          truck.is_go,
+          COALESCE(
+            NULLIF(product_truck.driver_name, ''),
+            NULLIF(TRIM(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, ''))), '')
+          ) AS driver_name,
+          driver.username AS driver_username,
+          ${truckVehicleSql.licensePlate} AS license_plate,
+          ${truckVehicleSql.licenseProvince} AS license_plate_province,
+          ${truckVehicleSql.model} AS vehicle_model,
+          warehouse_from.warehouse_name AS warehouse_name,
+          warehouse_to.warehouse_name AS to_warehouse_name,
+          NULLIF(
+            TRIM(CONCAT_WS(' ', NULLIF(creator.first_name, ''), NULLIF(creator.last_name, ''))),
+            ''
+          ) AS created_name
+        ${fromAndWhere}
+        ORDER BY product_truck.created_date DESC, product_truck.id DESC
+        ${paginationSql}
+      `,
+      [...baseParams, ...paginationParams],
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      summary: { total_items: Number(summaryRows[0]?.total_items || 0) },
+      pagination: { page, limit },
+    });
+  } catch (error) {
+    console.error("getProductTrucks error:", error);
+    return res.status(500).json({ success: false, message: "ไม่สามารถโหลดสินค้าในรถได้" });
+  }
+};

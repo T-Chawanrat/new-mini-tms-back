@@ -1,7 +1,6 @@
 import db from "../../config/db.js";
 import fs from "fs/promises";
 import path from "path";
-import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
@@ -12,7 +11,6 @@ const safeFolder = (value) =>
   String(value || "")
     .replace(/[^a-zA-Z0-9]/g, "")
     .slice(0, 80);
-const imageExtension = (file) => ({ "image/png": ".png", "image/webp": ".webp" })[file.mimetype] || ".jpg";
 const imageFiles = (req) => (Array.isArray(req.files?.images) ? req.files.images : []);
 const thumbnailPathOf = (filePath) => {
   const parsed = path.posix.parse(filePath);
@@ -200,7 +198,7 @@ export const createDeliveryIssueMessage = async (req, res) => {
     const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
     await fs.mkdir(absoluteDirectory, { recursive: true });
     for (const file of files) {
-      const fileName = `${randomUUID().replace(/-/g, "").slice(0, 16)}${imageExtension(file)}`;
+      const fileName = file.storedName;
       const thumbnailName = `${path.parse(fileName).name}.thumb.webp`;
       const absolutePath = path.join(absoluteDirectory, fileName);
       const thumbnailAbsolutePath = path.join(absoluteDirectory, thumbnailName);

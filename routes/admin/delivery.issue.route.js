@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import { auth } from "../../middlewares/auth.js";
+import { assignStoredImageNames } from "../../middlewares/upload.js";
 import { createDeliveryIssue, createDeliveryIssueMessage, getDeliveryIssueMessages, getDeliveryIssueThreads, updateDeliveryIssueStatus } from "../../controllers/admin/delivery.issue.controller.js";
 
 const router = express.Router();
@@ -9,5 +10,5 @@ router.get("/", auth, getDeliveryIssueThreads);
 router.post("/:receiveCode", auth, createDeliveryIssue);
 router.get("/:receiveCode/messages", auth, getDeliveryIssueMessages);
 router.patch("/:receiveCode/status", auth, updateDeliveryIssueStatus);
-router.post("/:receiveCode/messages", auth, upload.fields([{ name: "images", maxCount: 4 }]), createDeliveryIssueMessage);
+router.post("/:receiveCode/messages", auth, upload.fields([{ name: "images", maxCount: 4 }]), assignStoredImageNames, createDeliveryIssueMessage);
 export default router;

@@ -1,7 +1,6 @@
 import db from "../../config/db.js";
 import fs from "fs/promises";
 import path from "path";
-import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
 
@@ -13,12 +12,6 @@ const safeFolderName = (value) =>
   String(value || "")
     .replace(/[^a-zA-Z0-9]/g, "")
     .slice(0, 80);
-const fileExtension = (file) => {
-  const extension = path.extname(file.originalname || "").toLowerCase();
-  if ([".jpg", ".jpeg", ".png", ".webp"].includes(extension)) return extension;
-  return file.mimetype === "image/png" ? ".png" : file.mimetype === "image/webp" ? ".webp" : ".jpg";
-};
-const storedFileName = (file) => `${randomUUID().replace(/-/g, "").slice(0, 16)}${fileExtension(file)}`;
 const displayFileName = (file, fallback) =>
   String(file.originalname || "")
     .replace(/[\\/:*?"<>|\u0000-\u001F]/g, "_")
@@ -132,7 +125,7 @@ export const addCompletedDeliveryCloseMedia = async (req, res) => {
       for (const file of group.files) {
         const relativeDirectory = path.posix.join("delivery-closes", folderName, group.folder);
         const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
-        const storedName = storedFileName(file);
+        const storedName = file.storedName;
         const absolutePath = path.join(absoluteDirectory, storedName);
         await fs.mkdir(absoluteDirectory, { recursive: true });
         await fs.writeFile(absolutePath, file.buffer);

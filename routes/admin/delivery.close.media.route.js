@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import { addCompletedDeliveryCloseMedia, deleteCompletedDeliveryCloseMedia, searchCompletedDeliveryCloseMedia } from "../../controllers/admin/delivery.close.media.controller.js";
 import { auth } from "../../middlewares/auth.js";
+import { assignStoredImageNames } from "../../middlewares/upload.js";
 
 const router = express.Router();
 const upload = multer({
@@ -11,7 +12,7 @@ const upload = multer({
 });
 
 router.get("/search", auth, searchCompletedDeliveryCloseMedia);
-router.post("/", auth, upload.fields([{ name: "proof_images", maxCount: 8 }, { name: "sign_images", maxCount: 4 }]), addCompletedDeliveryCloseMedia);
+router.post("/", auth, upload.fields([{ name: "proof_images", maxCount: 8 }, { name: "sign_images", maxCount: 4 }]), assignStoredImageNames, addCompletedDeliveryCloseMedia);
 router.delete("/:mediaId", auth, deleteCompletedDeliveryCloseMedia);
 
 export default router;

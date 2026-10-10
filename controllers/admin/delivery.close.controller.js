@@ -1,7 +1,6 @@
 import db from "../../config/db.js";
 import fs from "fs/promises";
 import path from "path";
-import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
 import { getPositiveInteger } from "../../utils/pagination.js";
@@ -217,19 +216,7 @@ const parseSerialIds = (value) => {
   }
 };
 
-const fileExtension = (file) => {
-  const extension = path.extname(file.originalname || "").toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".webp"].includes(extension)
-    ? extension
-    : file.mimetype === "image/png"
-      ? ".png"
-      : file.mimetype === "image/webp"
-        ? ".webp"
-        : ".jpg";
-};
-
 const uploadedFiles = (req, field) => (Array.isArray(req.files?.[field]) ? req.files[field] : []);
-const shortFileName = (file) => `${randomUUID().replace(/-/g, "").slice(0, 16)}${fileExtension(file)}`;
 const displayFileName = (file, fallback) => {
   const name = String(file.originalname || "")
     .replace(/[\\/:*?"<>|\u0000-\u001F]/g, "_")
@@ -336,7 +323,7 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       for (const file of group.files) {
         const relativeDirectory = path.posix.join("delivery-closes", safeReceiveCode, group.folder);
         const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
-        const storedName = shortFileName(file);
+        const storedName = file.storedName;
         const originalName = displayFileName(file, storedName);
         const absolutePath = path.join(absoluteDirectory, storedName);
         const filePath = `/uploads/${relativeDirectory}/${storedName}`;

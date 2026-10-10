@@ -32,6 +32,8 @@ import deliveryCloseRoutes from "./routes/admin/delivery.close.route.js";
 import deliveryCloseMediaRoutes from "./routes/admin/delivery.close.media.route.js";
 import deliveryPendingReportRoutes from "./routes/admin/delivery.pending.report.route.js";
 import deliveryIssueRoutes from "./routes/admin/delivery.issue.route.js";
+import oilPriceRoutes from "./routes/admin/oil-price.route.js";
+import announcementRoutes from "./routes/admin/announcement.route.js";
 import { error } from "./middlewares/error.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -77,6 +79,8 @@ app.use("/move-tk", moveTkRoutes);
 app.use("/move-dt", moveDtRoutes);
 app.use("/move-dc", moveDcRoutes);
 app.use("/contractors", contractorRoutes);
+app.use("/oil-prices", oilPriceRoutes);
+app.use("/announcements", announcementRoutes);
 app.use("/driver", driverAuthRoute);
 
 

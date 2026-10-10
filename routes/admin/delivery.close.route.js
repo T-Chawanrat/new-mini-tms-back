@@ -3,6 +3,7 @@ import multer from "multer";
 
 import { getDeliveryCompletes, saveDeliveryCompleteStatuses, softDeleteDeliveryCloseMedia } from "../../controllers/admin/delivery.close.controller.js";
 import { auth } from "../../middlewares/auth.js";
+import { assignStoredImageNames } from "../../middlewares/upload.js";
 
 const router = express.Router();
 const uploadDeliveryMedia = multer({
@@ -26,6 +27,7 @@ router.post(
     { name: "proof_images", maxCount: 8 },
     { name: "sign_images", maxCount: 4 },
   ]),
+  assignStoredImageNames,
   saveDeliveryCompleteStatuses,
 );
 router.delete("/media/:mediaId", auth, softDeleteDeliveryCloseMedia);

@@ -138,38 +138,25 @@ export const getReceiveReport = async (req, res) => {
         MIN(t.reference_no) AS reference_no,
 
         MIN(t.receive_date) AS receive_date,
-        MIN(t.receive_walkin_id) AS receive_walkin_id,
         MIN(t.delivery_date) AS delivery_date,
 
         MIN(t.customer_id) AS customer_id,
         MIN(c.name) AS customer_name,
-        MIN(t.customer_type) AS customer_type,
 
         MIN(t.from_warehouse_id) AS from_warehouse_id,
         MIN(wf.warehouse_name) AS from_warehouse_name,
         MIN(t.to_warehouse_id) AS to_warehouse_id,
         MIN(wt.warehouse_name) AS to_warehouse_name,
 
-        MIN(t.recipient_id) AS recipient_id,
         MIN(t.recipient_code) AS recipient_code,
         MIN(t.recipient_name) AS recipient_name,
 
-        MIN(t.address) AS address,
-        MIN(t.district_id) AS district_id,
         MIN(t.district_name) AS district_name,
-        MIN(t.subdistrict_id) AS subdistrict_id,
         MIN(t.subdistrict_name) AS subdistrict_name,
-        MIN(t.province_id) AS province_id,
         MIN(t.province_name) AS province_name,
-        MIN(t.zip_code) AS zip_code,
         MIN(t.tel) AS tel,
 
-        MIN(t.shipper_id) AS shipper_id,
         MIN(t.shipper_name) AS shipper_name,
-
-        MIN(t.payment_type_id) AS payment_type_id,
-        MIN(t.recipient_detail_id) AS recipient_detail_id,
-        MIN(t.recipient_detail_name) AS recipient_detail_name,
 
         COUNT(*) AS total_rows,
         COUNT(DISTINCT t.serial_no) AS total_serial,
@@ -177,10 +164,7 @@ export const getReceiveReport = async (req, res) => {
         COALESCE(SUM(t.cost), 0) AS total_cost,
         COALESCE(SUM(t.cod), 0) AS total_cod,
         COALESCE(SUM(t.weight), 0) AS total_weight,
-        COALESCE(SUM(t.q), 0) AS total_qty,
-        COALESCE(SUM(t.vol), 0) AS total_vol,
-
-        MAX(t.last_modified) AS last_modified
+        COALESCE(SUM(t.vol), 0) AS total_vol
 
       FROM vw_receive_report_serials t
       LEFT JOIN mm_customers c
@@ -212,76 +196,25 @@ export const getReceiveReport = async (req, res) => {
 
         const serialSql = `
           SELECT
-            t.receive_code,
             t.receive_business_id,
-            t.reference_no,
-            t.receive_date,
-            t.receive_walkin_id,
-            t.delivery_date,
-
-            t.serial_id,
             t.serial_no,
 
             t.package_id,
             t.package_name,
-            t.package_detail_id,
             t.package_detail_name,
 
-            t.customer_id,
             t.cost,
-
-            t.from_warehouse_id,
-            t.to_warehouse_id,
-            wt.warehouse_name AS to_warehouse_name,
-
-            t.recipient_name,
-            t.recipient_code,
-            t.address,
-
-            t.district_id,
-            t.district_name,
-            t.subdistrict_id,
-            t.subdistrict_name,
-            t.province_id,
-            t.province_name,
-            t.zip_code,
-            t.tel,
-
-            t.item_is_deleted,
-
-            t.recipient_id,
-            t.shipper_id,
-            t.shipper_name,
-
-            t.document_return_id,
             t.remark,
-            t.url,
 
             t.cod,
             t.weight,
             t.width,
             t.length,
             t.height,
-            t.q,
-
             t.is_returned,
-            t.payment_type_id,
-
-            t.recipient_detail_id,
-            t.recipient_detail_name,
-
-            t.deleted_date,
-            t.deleted_by_user,
-
-            t.vol,
-            t.size_type,
-
-            t.last_modified,
-            t.customer_type
+            t.vol
 
           FROM vw_receive_report_serials t
-          LEFT JOIN mm_warehouses_to wt
-            ON wt.warehouse_id = t.to_warehouse_id
           WHERE t.receive_business_id IN (${placeholders})
             AND ${activeItemWhere("t")}
           ORDER BY
@@ -349,76 +282,25 @@ export const getReceiveReportSerials = async (req, res) => {
 
     const sql = `
       SELECT
-        t.receive_code,
         t.receive_business_id,
-        t.reference_no,
-        t.receive_date,
-        t.receive_walkin_id,
-        t.delivery_date,
-
-        t.serial_id,
         t.serial_no,
 
         t.package_id,
         t.package_name,
-        t.package_detail_id,
         t.package_detail_name,
 
-        t.customer_id,
         t.cost,
-
-        t.from_warehouse_id,
-        t.to_warehouse_id,
-        wt.warehouse_name AS to_warehouse_name,
-
-        t.recipient_name,
-        t.recipient_code,
-        t.address,
-
-        t.district_id,
-        t.district_name,
-        t.subdistrict_id,
-        t.subdistrict_name,
-        t.province_id,
-        t.province_name,
-        t.zip_code,
-        t.tel,
-
-        t.item_is_deleted,
-
-        t.recipient_id,
-        t.shipper_id,
-        t.shipper_name,
-
-        t.document_return_id,
         t.remark,
-        t.url,
 
         t.cod,
         t.weight,
         t.width,
         t.length,
         t.height,
-        t.q,
-
         t.is_returned,
-        t.payment_type_id,
-
-        t.recipient_detail_id,
-        t.recipient_detail_name,
-
-        t.deleted_date,
-        t.deleted_by_user,
-
-        t.vol,
-        t.size_type,
-
-        t.last_modified,
-        t.customer_type
+        t.vol
 
       FROM vw_receive_report_serials t
-      LEFT JOIN mm_warehouses_to wt
-        ON wt.warehouse_id = t.to_warehouse_id
       WHERE t.receive_business_id = ?
         AND ${activeItemWhere("t")}
       ORDER BY
@@ -529,7 +411,6 @@ export const getReceiveReportSummary = async (req, res) => {
         COALESCE(SUM(t.cost), 0) AS total_cost,
         COALESCE(SUM(t.cod), 0) AS total_cod,
         COALESCE(SUM(t.weight), 0) AS total_weight,
-        COALESCE(SUM(t.q), 0) AS total_qty,
         COALESCE(SUM(t.vol), 0) AS total_vol
       FROM vw_receive_report_serials t
       ${whereSql}
@@ -546,7 +427,6 @@ export const getReceiveReportSummary = async (req, res) => {
         COALESCE(SUM(t.cost), 0) AS total_cost,
         COALESCE(SUM(t.cod), 0) AS total_cod,
         COALESCE(SUM(t.weight), 0) AS total_weight,
-        COALESCE(SUM(t.q), 0) AS total_qty,
         COALESCE(SUM(t.vol), 0) AS total_vol
       FROM vw_receive_report_serials t
       ${whereSql}

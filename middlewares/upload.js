@@ -11,13 +11,30 @@ const uploadedFiles = (files) => {
 };
 
 export const assignStoredImageNames = (req, res, next) => {
-  for (const file of uploadedFiles(req.files)) {
+  const files = [...(req.file ? [req.file] : []), ...uploadedFiles(req.files)];
+
+  for (const file of files) {
     const extension = getImageFileExtension(file.originalname, file.mimetype);
     if (!extension) return res.status(400).json({ success: false, message: "ไฟล์รูปภาพไม่ถูกต้อง" });
     file.storedName = `${randomUUID().replaceAll("-", "").slice(0, 16)}${extension}`;
   }
   return next();
 };
+
+export const uploadTruckClosePhoto = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 1,
+    fileSize: 8 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (!getImageFileExtension(file.originalname, file.mimetype)) {
+      return cb(new Error("only jpeg, png, webp allowed"));
+    }
+
+    cb(null, true);
+  },
+});
 
 const roStorage = multer.diskStorage({
   destination: (req, file, cb) => {

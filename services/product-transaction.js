@@ -50,7 +50,7 @@ export const insertInitialProductTransactions = async ({
           receive_serial.receive_code,
           receive_serial.serial_id,
           receive_serial.serial_no,
-          'รับเข้าระบบ', 1, ?, NULL, 'PUBLIC',
+          'รับเข้าระบบ', 1, ?, NULL, NULL,
           actor.warehouse_id, actor.id, NULL, NULL, warehouse.warehouse_name,
           receive_serial.address, receive_serial.province_name, receive_serial.district_name,
           receive_serial.subdistrict_name, receive_serial.zip_code,

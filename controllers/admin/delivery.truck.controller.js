@@ -960,6 +960,9 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       is_dc_mismatch: "N",
       parcel_to_warehouse_id: product.to_warehouse_id,
       truck_to_warehouse_id: null,
+      is_route_mismatch: product.route_id == null || truck.route_id == null ? null : routeWarningCode === "ROUTE_MISMATCH" ? "Y" : "N",
+      parcel_route_id: product.route_id,
+      truck_route_id: truck.route_id,
       created_date: now,
     });
 

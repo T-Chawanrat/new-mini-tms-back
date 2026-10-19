@@ -131,6 +131,9 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
       INNER JOIN tm_product_trucks product_truck
         ON product_truck.serial_id = transaction_last.serial_id
         AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_truck.serial_id
+        AND product_active.serial_no = product_truck.serial_no
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
       INNER JOIN um_users actor
@@ -156,6 +159,9 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
       INNER JOIN tm_product_trucks product_truck
         ON product_truck.serial_id = transaction_last.serial_id
         AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_truck.serial_id
+        AND product_active.serial_no = product_truck.serial_no
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
       INNER JOIN um_users actor
@@ -263,6 +269,10 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
       return res.status(400).json({ success: false, message: "กรุณาถ่ายรูปปิดบรรทุก" });
     }
 
+    if (latitude === null || longitude === null || accuracyM === null) {
+      return res.status(400).json({ success: false, message: "กรุณาเปิดตำแหน่งและอนุญาตสิทธิ์ตำแหน่งก่อนปิดบรรทุก" });
+    }
+
     connection = await db.getConnection();
     await connection.beginTransaction();
     transactionStarted = true;
@@ -305,6 +315,25 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
       await connection.rollback();
       transactionStarted = false;
       return res.status(409).json({ success: false, message: "ใบรถกระจายยังไม่มี Serial No" });
+    }
+
+    const [[activeProducts]] = await connection.query(
+      `
+        SELECT COUNT(*) AS total
+        FROM tm_product_trucks product_truck
+        WHERE product_truck.truck_load_id = ?
+          AND EXISTS (
+            SELECT 1 FROM tm_product_actived product_active
+            WHERE product_active.serial_id = product_truck.serial_id
+              AND product_active.serial_no = product_truck.serial_no
+          )
+      `,
+      [truckLoadId],
+    );
+    if (Number(activeProducts.total) === 0) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(409).json({ success: false, message: "ใบรถกระจายไม่มีสินค้าที่ยังไม่ปิดงาน" });
     }
 
     const [[clock]] = await connection.query(`
@@ -362,7 +391,14 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
     );
 
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      `UPDATE tm_product_trucks product_truck
+       SET product_truck.status = 'IN_TRANSIT'
+       WHERE product_truck.truck_load_id = ? AND product_truck.status = 'LOADED'
+         AND EXISTS (
+           SELECT 1 FROM tm_product_actived product_active
+           WHERE product_active.serial_id = product_truck.serial_id
+             AND product_active.serial_no = product_truck.serial_no
+         )`,
       [truckLoadId],
     );
 
@@ -386,7 +422,8 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
             product_truck_id, serial_id, serial_no, event_type, created_by,
             user_truck_id, driver_name, truck_id, truck_license_plate,
             license_plate_province_id, status, truck_load_id, is_dc_mismatch,
-            parcel_to_warehouse_id, truck_to_warehouse_id, created_date
+            parcel_to_warehouse_id, truck_to_warehouse_id,
+            is_route_mismatch, parcel_route_id, truck_route_id, created_date
           )
           SELECT
             product_truck.id,
@@ -404,9 +441,19 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
             'N',
             receive_serial.to_warehouse_id,
             NULL,
+            CASE
+              WHEN product_truck.route_id IS NULL OR truck.route_id IS NULL THEN NULL
+              WHEN product_truck.route_id <> truck.route_id THEN 'Y'
+              ELSE 'N'
+            END,
+            product_truck.route_id,
+            truck.route_id,
             ?
           FROM tm_product_trucks product_truck
           INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = product_truck.serial_id
+            AND product_active.serial_no = product_truck.serial_no
           LEFT JOIN mm_vehicles vehicle ON vehicle.id = product_truck.truck_id
           LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
           LEFT JOIN tm_receive_serials receive_serial

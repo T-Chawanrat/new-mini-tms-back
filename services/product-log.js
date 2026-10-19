@@ -14,6 +14,9 @@ const PRODUCT_TRUCK_LOG_COLUMNS = [
   "is_dc_mismatch",
   "parcel_to_warehouse_id",
   "truck_to_warehouse_id",
+  "is_route_mismatch",
+  "parcel_route_id",
+  "truck_route_id",
   "created_date",
 ];
 

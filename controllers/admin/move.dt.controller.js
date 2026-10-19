@@ -136,7 +136,7 @@ export const getMoveDtProducts = async (req, res) => {
           AND ${truckConditions}
           AND COALESCE(truck.is_deleted, 'N') = 'N'
           AND COALESCE(truck.is_arrived, 'N') <> 'Y'
-          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
         ORDER BY product_truck.id ASC
       `,
       [truckLoadId],
@@ -222,7 +222,7 @@ export const moveDtProducts = async (req, res) => {
           AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no IN (${placeholders})
-          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
         FOR UPDATE
       `,
       [sourceTruckLoadId, ...serialNos],
@@ -270,12 +270,12 @@ export const moveDtProducts = async (req, res) => {
           product_truck.driver_name = target_truck.driver_name,
           product_truck.truck_id = target_truck.vehicle_id,
           product_truck.status = CASE
-            WHEN target_truck.is_go = 'Y' THEN 'DELIVERING'
+            WHEN target_truck.is_go = 'Y' THEN 'IN_TRANSIT'
             ELSE 'LOADED'
           END
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no IN (${placeholders})
-          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
       `,
       [targetTruckLoadId, sourceTruckLoadId, ...serialNos],
     );
@@ -314,7 +314,7 @@ export const moveDtProducts = async (req, res) => {
           product_truck.id,
           product_truck.serial_id,
           product_truck.serial_no,
-          'MOVE',
+          'MOVE_TK_DT',
           ?,
           target_truck.user_truck_id,
           CASE

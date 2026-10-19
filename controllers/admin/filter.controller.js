@@ -35,7 +35,7 @@ export const getDriverUsers = async (req, res) => {
         license_expire
       FROM um_users
       WHERE role_id = 7
-      ORDER BY first_name ASC, last_name ASC
+      ORDER BY employee_code ASC,
     `;
 
     const [rows] = await db.query(sql);

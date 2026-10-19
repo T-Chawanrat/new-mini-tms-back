@@ -418,7 +418,7 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.receive_code,
           transaction_last.serial_id,
           transaction_last.serial_no,
-          'พัสดุถึงศูนย์', 4, ?, NULL, 'PUBLIC',
+          'พัสดุถึงศูนย์', 4, ?, NULL, NULL,
           ?, actor.id, transaction_last.latitude, transaction_last.longitude, warehouse.warehouse_name,
           transaction_last.address, transaction_last.province_name, transaction_last.district_name,
           transaction_last.subdistrict_name, transaction_last.zip_code,
@@ -433,7 +433,7 @@ export const createWarehouseReceive = async (req, res) => {
           ON warehouse.warehouse_id = ?
         WHERE transaction_last.serial_no IN (${placeholders})
       `,
-      [now, warehouseId, createdBy, dataYear, dataYearmonth, createdBy, warehouseId, ...serialNos],
+      [now, warehouseId, dataYear, dataYearmonth, createdBy, warehouseId, ...serialNos],
     );
 
     await connection.query(
@@ -448,7 +448,7 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.status_id = 4,
           transaction_last.datetime = ?,
           transaction_last.update_date = ?,
-          transaction_last.type = 'PUBLIC',
+          transaction_last.type = NULL,
           transaction_last.warehouse_id = ?,
           transaction_last.created_by = ?,
           transaction_last.warehouse_name = warehouse.warehouse_name,

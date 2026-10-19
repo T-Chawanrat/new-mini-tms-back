@@ -58,7 +58,7 @@ export const getProductTrucks = async (req, res) => {
       LEFT JOIN mm_warehouses_to warehouse_to ON warehouse_to.warehouse_id = truck.to_warehouse_id
       LEFT JOIN mm_routes route ON route.route_id = truck.route_id
       WHERE COALESCE(truck.is_deleted, 'N') = 'N'
-        AND product_truck.status IN ('LOADED', 'DELIVERING')
+        AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
         AND truck.warehouse_id = ?
         ${truckTypeCondition}
         ${searchConditions}

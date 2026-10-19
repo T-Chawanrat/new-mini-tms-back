@@ -508,7 +508,7 @@ export const getTruckLoadProducts = async (req, res) => {
         ON warehouse_to.warehouse_id = pw.to_warehouse_id
       LEFT JOIN tm_product_trucks active_truck
         ON active_truck.serial_id = pw.serial_id
-        AND active_truck.status IN ('LOADED', 'DELIVERING')
+        AND active_truck.status IN ('LOADED', 'IN_TRANSIT')
       WHERE NULLIF(TRIM(pw.serial_no), '') IS NOT NULL
         AND pw.now_warehouse_id = ?
         AND pw.to_warehouse_id = ?
@@ -543,7 +543,7 @@ export const getTruckLoadProducts = async (req, res) => {
         LEFT JOIN mm_warehouses_to warehouse_to
           ON warehouse_to.warehouse_id = rs.to_warehouse_id
         WHERE pt.truck_load_id = ?
-          AND pt.status IN ('LOADED', 'DELIVERING')
+          AND pt.status IN ('LOADED', 'IN_TRANSIT')
         ORDER BY pt.id DESC
       `,
       [truckLoadId],
@@ -676,7 +676,7 @@ export const loadTruckProduct = async (req, res) => {
         SELECT id
         FROM tm_product_trucks
         WHERE serial_id = ?
-          AND status IN ('LOADED', 'DELIVERING')
+          AND status IN ('LOADED', 'IN_TRANSIT')
         LIMIT 1
       `,
       [product.serial_id],
@@ -721,7 +721,7 @@ export const loadTruckProduct = async (req, res) => {
       product_truck_id: productTruckResult.insertId,
       serial_id: product.serial_id,
       serial_no: product.serial_no,
-      event_type: "LOAD",
+      event_type: "LOAD_TK",
       created_by: actorId,
       user_truck_id: truckLoad.user_truck_id,
       driver_name: truckLoad.driver_name,
@@ -863,7 +863,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
       [actorId, now, actorId, now, truckLoadId],
     );
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'`,
       [truckLoadId],
     );
     if (rows[0].is_close !== "Y") {
@@ -889,14 +889,14 @@ export const closeAndGoTruckLoad = async (req, res) => {
             product_truck.id,
             product_truck.serial_id,
             product_truck.serial_no,
-            'DISPATCH',
+            'DEPART_TK',
             ?,
             product_truck.user_truck_id,
             COALESCE(product_truck.driver_name, truck.driver_name),
             product_truck.truck_id,
             ${truckVehicleSql.licensePlate},
             ${truckVehicleSql.licensePlateProvinceId},
-            'DELIVERING',
+            'IN_TRANSIT',
             product_truck.truck_load_id,
             CASE
               WHEN receive_serial.to_warehouse_id IS NOT NULL
@@ -916,7 +916,7 @@ export const closeAndGoTruckLoad = async (req, res) => {
             ON receive_serial.serial_id = product_truck.serial_id
             AND receive_serial.serial_no = product_truck.serial_no
           WHERE product_truck.truck_load_id = ?
-            AND product_truck.status = 'DELIVERING'
+            AND product_truck.status = 'IN_TRANSIT'
         `,
         [actorId, now, truckLoadId],
       );
@@ -1061,7 +1061,7 @@ export const unloadTruckProduct = async (req, res) => {
           AND product_warehouse.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
           AND product_truck.serial_no = ?
-          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
         ORDER BY product_warehouse.id DESC
         LIMIT 1
         FOR UPDATE
@@ -1131,7 +1131,7 @@ export const unloadTruckProduct = async (req, res) => {
       product_truck_id: productTruck.id,
       serial_id: productTruck.serial_id,
       serial_no: productTruck.serial_no,
-      event_type: "UNLOAD",
+      event_type: "UNLOAD_TK",
       created_by: actorId,
       user_truck_id: productTruck.user_truck_id,
       driver_name: productTruck.driver_name,
@@ -1288,7 +1288,7 @@ export const deleteTruckLoad = async (req, res) => {
           product_truck.id,
           product_truck.serial_id,
           product_truck.serial_no,
-          'CANCEL',
+          'UNLOAD_TK',
           ?,
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),

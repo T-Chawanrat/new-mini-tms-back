@@ -34,7 +34,7 @@ const createDcReceiveDraft = async ({ batchId, serialNo, warehouseId, actorId })
           ON receive_serial.serial_id = product_truck.serial_id
           AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.serial_no = ?
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
           AND truck.to_warehouse_id = ?
           AND truck.is_close = 'Y'
           AND truck.is_go = 'Y'
@@ -163,7 +163,7 @@ export const getDcReceiveSerials = async (req, res) => {
           AND truck.is_close = 'Y'
           AND truck.is_go = 'Y'
           AND COALESCE(truck.is_deleted, 'N') = 'N'
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
         ORDER BY truck.truck_code ASC, product_truck.id ASC
       `,
       [warehouseId, warehouseId],
@@ -283,7 +283,7 @@ export const createDcReceive = async (req, res) => {
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         WHERE product_truck.serial_no IN (${placeholders})
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
           AND truck.to_warehouse_id = ?
           AND truck.is_close = 'Y'
           AND truck.is_go = 'Y'
@@ -333,7 +333,7 @@ export const createDcReceive = async (req, res) => {
           AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.serial_no IN (${placeholders})
           AND truck.to_warehouse_id = ?
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
       `,
       [warehouseId, actorId, now, ...serialNos, warehouseId],
     );
@@ -371,7 +371,7 @@ export const createDcReceive = async (req, res) => {
           product_truck.id,
           product_truck.serial_id,
           product_truck.serial_no,
-          'UNLOAD',
+          'UNLOAD_TK',
           ?,
           product_truck.user_truck_id,
           COALESCE(product_truck.driver_name, truck.driver_name),
@@ -402,7 +402,7 @@ export const createDcReceive = async (req, res) => {
           AND product_warehouse.serial_no = product_truck.serial_no
         WHERE product_truck.serial_no IN (${placeholders})
           AND truck.to_warehouse_id = ?
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
       `,
       [actorId, now, ...serialNos, warehouseId],
     );
@@ -416,7 +416,7 @@ export const createDcReceive = async (req, res) => {
           AND product_truck.serial_no = detail.serial_no
         SET detail.is_receive = 'Y', detail.receive_by = ?, detail.receive_date = ?
         WHERE product_truck.serial_no IN (${placeholders})
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
       `,
       [actorId, now, ...serialNos],
     );
@@ -490,7 +490,7 @@ export const createDcReceive = async (req, res) => {
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         WHERE serial_no IN (${placeholders})
-          AND product_truck.status = 'DELIVERING'
+          AND product_truck.status = 'IN_TRANSIT'
           AND truck.to_warehouse_id = ?
       `,
       [...serialNos, warehouseId],
@@ -515,7 +515,7 @@ export const createDcReceive = async (req, res) => {
               SELECT 1
               FROM tm_product_trucks remaining_product
               WHERE remaining_product.truck_load_id = truck.id
-                AND remaining_product.status IN ('LOADED', 'DELIVERING')
+                AND remaining_product.status IN ('LOADED', 'IN_TRANSIT')
             )
         `,
         [actorId, now, ...truckLoadIds, warehouseId],

@@ -362,7 +362,7 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
     );
 
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'`,
       [truckLoadId],
     );
 
@@ -392,14 +392,14 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
             product_truck.id,
             product_truck.serial_id,
             product_truck.serial_no,
-            'DISPATCH',
+            'DISPATCH_DT',
             ?,
             product_truck.user_truck_id,
             COALESCE(product_truck.driver_name, truck.driver_name),
             product_truck.truck_id,
             ${truckVehicleSql.licensePlate},
             ${truckVehicleSql.licensePlateProvinceId},
-            'DELIVERING',
+            'IN_TRANSIT',
             product_truck.truck_load_id,
             'N',
             receive_serial.to_warehouse_id,
@@ -413,7 +413,7 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
             ON receive_serial.serial_id = product_truck.serial_id
             AND receive_serial.serial_no = product_truck.serial_no
           WHERE product_truck.truck_load_id = ?
-            AND product_truck.status = 'DELIVERING'
+            AND product_truck.status = 'IN_TRANSIT'
         `,
         [actorId, clock.now, truckLoadId],
       );

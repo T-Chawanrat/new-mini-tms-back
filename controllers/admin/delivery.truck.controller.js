@@ -536,7 +536,7 @@ export const getDeliveryTruckProducts = async (req, res) => {
           ON receive_serial.serial_id = product_truck.serial_id
           AND receive_serial.serial_no = product_truck.serial_no
         WHERE product_truck.truck_load_id = ?
-          AND product_truck.status IN ('LOADED', 'DELIVERING')
+          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
         ORDER BY product_truck.id DESC
       `,
       [truckLoadId],
@@ -721,7 +721,7 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
     );
 
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'DELIVERING' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'`,
       [truckLoadId],
     );
 
@@ -749,14 +749,14 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
             product_truck.id,
             product_truck.serial_id,
             product_truck.serial_no,
-            'DISPATCH',
+            'DISPATCH_DT',
             ?,
             product_truck.user_truck_id,
             COALESCE(product_truck.driver_name, truck.driver_name),
             product_truck.truck_id,
             ${truckVehicleSql.licensePlate},
             ${truckVehicleSql.licensePlateProvinceId},
-            'DELIVERING',
+            'IN_TRANSIT',
             product_truck.truck_load_id,
             'N',
             receive_serial.to_warehouse_id,
@@ -770,7 +770,7 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
             ON receive_serial.serial_id = product_truck.serial_id
             AND receive_serial.serial_no = product_truck.serial_no
           WHERE product_truck.truck_load_id = ?
-            AND product_truck.status = 'DELIVERING'
+            AND product_truck.status = 'IN_TRANSIT'
         `,
         [actorId, now, truckLoadId],
       );
@@ -886,7 +886,7 @@ export const loadDeliveryTruckProduct = async (req, res) => {
     }
 
     const [activeRows] = await connection.query(
-      `SELECT id FROM tm_product_trucks WHERE serial_id = ? AND status IN ('LOADED', 'DELIVERING') LIMIT 1`,
+      `SELECT id FROM tm_product_trucks WHERE serial_id = ? AND status IN ('LOADED', 'IN_TRANSIT') LIMIT 1`,
       [product.serial_id],
     );
 
@@ -933,7 +933,7 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       product_truck_id: productTruckResult.insertId,
       serial_id: product.serial_id,
       serial_no: product.serial_no,
-      event_type: "LOAD",
+      event_type: "LOAD_DT",
       created_by: actorId,
       user_truck_id: truck.user_truck_id,
       driver_name: truck.driver_name,
@@ -1058,7 +1058,7 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
       product_truck_id: product.id,
       serial_id: product.serial_id,
       serial_no: product.serial_no,
-      event_type: "UNLOAD",
+      event_type: "UNLOAD_DT",
       created_by: actorId,
       user_truck_id: product.user_truck_id,
       driver_name: product.driver_name,
@@ -1180,7 +1180,7 @@ export const deleteDeliveryTruck = async (req, res) => {
         product_truck_id: product.id,
         serial_id: product.serial_id,
         serial_no: product.serial_no,
-        event_type: "UNLOAD",
+        event_type: "UNLOAD_DT",
         created_by: actorId,
         user_truck_id: product.user_truck_id,
         driver_name: product.driver_name,

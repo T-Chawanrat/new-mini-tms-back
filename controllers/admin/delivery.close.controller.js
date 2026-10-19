@@ -68,9 +68,9 @@ export const getDeliveryCompletes = async (req, res) => {
     const selectedSearchField = searchFieldByType[requestedSearchType];
     const searchSql = search ? `${selectedSearchField || "rs.receive_code"} LIKE ?` : "1 = 1";
     const searchParams = search ? [`%${search}%`] : [];
-    const billIsRelevantSql = `(
-      EXISTS (SELECT 1 FROM tm_product_actived active WHERE active.serial_id = rs.serial_id)
-      OR EXISTS (SELECT 1 FROM tm_delivery_close status WHERE status.serial_id = rs.serial_id)
+    const billIsRelevantSql = `EXISTS (
+      SELECT 1 FROM tm_product_actived active
+      WHERE active.serial_id = rs.serial_id AND active.serial_no = rs.serial_no
     )`;
     const offset = (page - 1) * limit;
 
@@ -131,7 +131,7 @@ export const getDeliveryCompletes = async (req, res) => {
           delivery_status.delivered_datetime
         FROM tm_receive_serials rs
         LEFT JOIN tm_delivery_close delivery_status ON delivery_status.serial_id = rs.serial_id
-        WHERE ${currentReceiveSerialSql} AND (${billCondition})
+        WHERE ${currentReceiveSerialSql} AND ${billIsRelevantSql} AND (${billCondition})
         ORDER BY rs.receive_code, rs.serial_no
       `,
       billParams,
@@ -265,7 +265,7 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     const [products] = await connection.query(
       `SELECT DISTINCT active.serial_id, rs.serial_no, rs.receive_business_id, rs.receive_walkin_id
        FROM tm_product_actived active
-       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id AND rs.serial_no = active.serial_no
        WHERE ${currentReceiveSerialSql} AND active.serial_id IN (${placeholders}) AND rs.receive_code = ? FOR UPDATE`,
       [...serialIds, receiveCode],
     );
@@ -296,9 +296,11 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
       return res.status(400).json({ success: false, message: "กรุณาเพิ่มรูปหลักฐานและลายเซ็นอย่างน้อยอย่างละ 1 รูป" });
     }
 
+    const serialPairPlaceholders = products.map(() => "(?, ?)").join(", ");
+    const serialPairParams = products.flatMap((product) => [product.serial_id, product.serial_no]);
     const [lastTransactions] = await connection.query(
-      `SELECT serial_id FROM tm_product_transactions_last WHERE serial_id IN (${placeholders}) FOR UPDATE`,
-      serialIds,
+      `SELECT serial_id FROM tm_product_transactions_last WHERE (serial_id, serial_no) IN (${serialPairPlaceholders}) FOR UPDATE`,
+      serialPairParams,
     );
     if (new Set(lastTransactions.map((item) => item.serial_id)).size !== serialIds.length) {
       await connection.rollback();
@@ -357,8 +359,9 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
          previous.address, previous.province_name, previous.district_name, previous.subdistrict_name, previous.zip_code,
          previous.created_name, previous.username, previous.user_id, ?, ?
        FROM tm_product_actived active
-       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
-       INNER JOIN tm_product_transactions_last previous ON previous.serial_id = active.serial_id
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id AND rs.serial_no = active.serial_no
+       INNER JOIN tm_product_transactions_last previous
+         ON previous.serial_id = active.serial_id AND previous.serial_no = active.serial_no
        WHERE ${currentReceiveSerialSql} AND active.serial_id IN (${placeholders}) AND rs.receive_code = ?`,
       [
         deliveredAt,
@@ -376,10 +379,10 @@ export const saveDeliveryCompleteStatuses = async (req, res) => {
     await connection.query(
       `UPDATE tm_product_transactions_last
        SET status_message = 'จัดส่งสำเร็จ', status_id = 18, datetime = ?, update_date = ?, type = 'WEB_ADMIN', warehouse_id = ?, created_by = ?, latitude = ?, longitude = ?
-       WHERE serial_id IN (${placeholders})`,
-      [deliveredAt, now, warehouseId, actorId, lat === null ? null : String(lat), lng === null ? null : String(lng), ...serialIds],
+       WHERE (serial_id, serial_no) IN (${serialPairPlaceholders})`,
+      [deliveredAt, now, warehouseId, actorId, lat === null ? null : String(lat), lng === null ? null : String(lng), ...serialPairParams],
     );
-    await connection.query(`DELETE FROM tm_product_actived WHERE serial_id IN (${placeholders})`, serialIds);
+    await connection.query(`DELETE FROM tm_product_actived WHERE (serial_id, serial_no) IN (${serialPairPlaceholders})`, serialPairParams);
 
     await connection.commit();
     const activeMedia = await getActiveBillMedia(connection, [bill]);
@@ -429,7 +432,7 @@ export const softDeleteDeliveryCloseMedia = async (req, res) => {
     const [activeRows] = await connection.query(
       `SELECT 1
        FROM tm_product_actived active
-       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id
+       INNER JOIN tm_receive_serials rs ON rs.serial_id = active.serial_id AND rs.serial_no = active.serial_no
        WHERE ${currentReceiveSerialSql}
          AND rs.receive_business_id <=> ?
          AND rs.receive_walkin_id <=> ?

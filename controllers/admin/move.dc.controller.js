@@ -56,6 +56,9 @@ export const getMoveDcProducts = async (req, res) => {
               temp_product.to_warehouse_id,
               destination.warehouse_name AS to_warehouse_name
             FROM tmp_product_warehouses temp_product
+            INNER JOIN tm_product_actived product_active
+              ON product_active.serial_id = temp_product.serial_id
+              AND product_active.serial_no = temp_product.serial_no
             LEFT JOIN tm_receive_serials receive_serial
               ON receive_serial.serial_id = temp_product.serial_id
               AND receive_serial.serial_no = temp_product.serial_no
@@ -238,6 +241,9 @@ const confirmMoveDc = async (req, res) => {
     await connection.query(
       `
         UPDATE tm_product_warehouses product_warehouse
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_warehouse.serial_id
+          AND product_active.serial_no = product_warehouse.serial_no
         INNER JOIN tmp_product_warehouses temp_product
           ON temp_product.serial_id = product_warehouse.serial_id
           AND temp_product.serial_no = product_warehouse.serial_no
@@ -269,6 +275,9 @@ const confirmMoveDc = async (req, res) => {
           ?,
           ?
         FROM tmp_product_warehouses temp_product
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = temp_product.serial_id
+          AND product_active.serial_no = temp_product.serial_no
         INNER JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = temp_product.serial_id
           AND product_warehouse.serial_no = temp_product.serial_no

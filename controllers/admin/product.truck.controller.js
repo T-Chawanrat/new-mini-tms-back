@@ -44,6 +44,9 @@ export const getProductTrucks = async (req, res) => {
 
     const fromAndWhere = `
       FROM tm_product_trucks product_truck
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_truck.serial_id
+        AND product_active.serial_no = product_truck.serial_no
       INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
       LEFT JOIN um_users driver ON driver.id = product_truck.user_truck_id
       LEFT JOIN um_users creator ON creator.id = product_truck.created_by

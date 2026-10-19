@@ -138,6 +138,9 @@ export const getMoveTkProducts = async (req, res) => {
           COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
           destination.warehouse_name AS to_warehouse_name
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
@@ -183,6 +186,9 @@ export const getMoveTkProducts = async (req, res) => {
               COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id,
               destination.warehouse_name AS to_warehouse_name
             FROM tmp_product_trucks temp
+            INNER JOIN tm_product_actived product_active
+              ON product_active.serial_id = temp.serial_id
+              AND product_active.serial_no = temp.serial_no
             INNER JOIN tm_product_trucks product_truck
               ON product_truck.id = temp.source_product_truck_id
             INNER JOIN tm_trucks truck
@@ -281,12 +287,15 @@ export const moveTkProducts = async (req, res) => {
     if (action === "CONFIRM") {
       const [draftRows] = await connection.query(
         `
-          SELECT serial_no
-          FROM tmp_product_trucks
-          WHERE action_type = 'MOVE_TK'
-            AND created_by = ?
-            AND source_truck_load_id = ?
-            AND truck_load_id = ?
+          SELECT temp.serial_no
+          FROM tmp_product_trucks temp
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = temp.serial_id
+            AND product_active.serial_no = temp.serial_no
+          WHERE temp.action_type = 'MOVE_TK'
+            AND temp.created_by = ?
+            AND temp.source_truck_load_id = ?
+            AND temp.truck_load_id = ?
           FOR UPDATE
         `,
         [actorId, sourceTruckLoadId, targetTruckLoadId],
@@ -348,6 +357,9 @@ export const moveTkProducts = async (req, res) => {
           product_truck.serial_no,
           COALESCE(product_warehouse.to_warehouse_id, receive_serial.to_warehouse_id) AS to_warehouse_id
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         LEFT JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.id = (
             SELECT MAX(latest_warehouse.id)
@@ -429,6 +441,9 @@ export const moveTkProducts = async (req, res) => {
     const [result] = await connection.query(
       `
         UPDATE tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks target_truck
           ON target_truck.id = ?
         SET
@@ -453,6 +468,11 @@ export const moveTkProducts = async (req, res) => {
         SET truck_load_id = ?
         WHERE truck_load_id = ?
           AND serial_no IN (${placeholders})
+          AND EXISTS (
+            SELECT 1 FROM tm_product_actived product_active
+            WHERE product_active.serial_id = tm_truck_details.serial_id
+              AND product_active.serial_no = tm_truck_details.serial_no
+          )
       `,
       [targetTruckLoadId, sourceTruckLoadId, ...serialNos],
     );
@@ -507,6 +527,9 @@ export const moveTkProducts = async (req, res) => {
           target_truck.to_warehouse_id,
           ?
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks target_truck
           ON target_truck.id = product_truck.truck_load_id
         LEFT JOIN um_users driver

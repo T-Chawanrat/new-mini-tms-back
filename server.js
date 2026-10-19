@@ -35,6 +35,7 @@ import deliveryPendingReportRoutes from "./routes/admin/delivery.pending.report.
 import deliveryIssueRoutes from "./routes/admin/delivery.issue.route.js";
 import oilPriceRoutes from "./routes/admin/oil-price.route.js";
 import announcementRoutes from "./routes/admin/announcement.route.js";
+import logRoutes from "./routes/admin/log.route.js";
 import { error } from "./middlewares/error.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +84,7 @@ app.use("/move-dc", moveDcRoutes);
 app.use("/contractors", contractorRoutes);
 app.use("/oil-prices", oilPriceRoutes);
 app.use("/announcements", announcementRoutes);
+app.use("/logs", logRoutes);
 app.use("/driver", driverAuthRoute);
 
 

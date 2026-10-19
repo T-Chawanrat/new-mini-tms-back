@@ -28,6 +28,9 @@ const createDcReceiveDraft = async ({ batchId, serialNo, warehouseId, actorId })
           receive_serial.to_warehouse_id AS receive_to_warehouse_id,
           receive_serial.route_id AS receive_route_id
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN tm_receive_serials receive_serial
@@ -52,7 +55,11 @@ const createDcReceiveDraft = async ({ batchId, serialNo, warehouseId, actorId })
 
     const product = productRows[0];
     const [warehouseRows] = await connection.query(
-      "SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE",
+      `SELECT product_warehouse.id FROM tm_product_warehouses product_warehouse
+       INNER JOIN tm_product_actived product_active
+         ON product_active.serial_id = product_warehouse.serial_id
+         AND product_active.serial_no = product_warehouse.serial_no
+       WHERE product_warehouse.serial_no = ? LIMIT 1 FOR UPDATE`,
       [product.serial_no],
     );
 
@@ -149,6 +156,9 @@ export const getDcReceiveSerials = async (req, res) => {
           vehicle.license_plate_province_id,
           vehicle.license_plate_province AS license_province
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN um_users driver
@@ -182,6 +192,9 @@ export const getDcReceiveSerials = async (req, res) => {
               vehicle.license_plate,
               province.province_name AS license_province
             FROM tmp_product_warehouses temp
+            INNER JOIN tm_product_actived product_active
+              ON product_active.serial_id = temp.serial_id
+              AND product_active.serial_no = temp.serial_no
             LEFT JOIN tm_trucks truck
               ON truck.id = temp.source_truck_load_id
             LEFT JOIN tm_product_trucks product_truck
@@ -252,11 +265,14 @@ export const createDcReceive = async (req, res) => {
     if (action === "CONFIRM") {
       const [draftRows] = await connection.query(
         `
-          SELECT serial_no
-          FROM tmp_product_warehouses
-          WHERE action_type = 'DC_RECEIVE'
-            AND created_by = ?
-            AND now_warehouse_id = ?
+          SELECT temp.serial_no
+          FROM tmp_product_warehouses temp
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = temp.serial_id
+            AND product_active.serial_no = temp.serial_no
+          WHERE temp.action_type = 'DC_RECEIVE'
+            AND temp.created_by = ?
+            AND temp.now_warehouse_id = ?
           FOR UPDATE
         `,
         [actorId, warehouseId],
@@ -280,6 +296,9 @@ export const createDcReceive = async (req, res) => {
           product_truck.serial_no,
           truck.to_warehouse_id
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         WHERE product_truck.serial_no IN (${placeholders})
@@ -326,6 +345,9 @@ export const createDcReceive = async (req, res) => {
           ?,
           ?
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN tm_receive_serials receive_serial
@@ -354,6 +376,9 @@ export const createDcReceive = async (req, res) => {
           ?,
           ?
         FROM tm_product_warehouses product_warehouse
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_warehouse.serial_id
+          AND product_active.serial_no = product_warehouse.serial_no
         WHERE product_warehouse.serial_no IN (${placeholders})
       `,
       [actorId, now, ...serialNos],
@@ -390,6 +415,9 @@ export const createDcReceive = async (req, res) => {
           truck.to_warehouse_id,
           ?
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         LEFT JOIN mm_vehicles vehicle
@@ -414,6 +442,9 @@ export const createDcReceive = async (req, res) => {
           ON product_truck.truck_load_id = detail.truck_load_id
           AND product_truck.serial_id = detail.serial_id
           AND product_truck.serial_no = detail.serial_no
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = detail.serial_id
+          AND product_active.serial_no = detail.serial_no
         SET detail.is_receive = 'Y', detail.receive_by = ?, detail.receive_date = ?
         WHERE product_truck.serial_no IN (${placeholders})
           AND product_truck.status = 'IN_TRANSIT'
@@ -450,6 +481,9 @@ export const createDcReceive = async (req, res) => {
           transaction_last.truck_name, transaction_last.truck_id, transaction_last.vehicle_contractor_id,
           transaction_last.truck_province, transaction_last.note, ?, ?
         FROM tm_product_transactions_last transaction_last
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = transaction_last.serial_id
+          AND product_active.serial_no = transaction_last.serial_no
         INNER JOIN um_users actor
           ON actor.id = ?
         LEFT JOIN mm_warehouses_to warehouse
@@ -462,6 +496,9 @@ export const createDcReceive = async (req, res) => {
     await connection.query(
       `
         UPDATE tm_product_transactions_last transaction_last
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = transaction_last.serial_id
+          AND product_active.serial_no = transaction_last.serial_no
         INNER JOIN um_users actor
           ON actor.id = ?
         LEFT JOIN mm_warehouses_to warehouse
@@ -487,6 +524,9 @@ export const createDcReceive = async (req, res) => {
       `
         DELETE product_truck
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
         WHERE serial_no IN (${placeholders})

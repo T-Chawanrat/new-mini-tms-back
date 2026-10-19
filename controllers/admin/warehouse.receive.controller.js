@@ -29,6 +29,9 @@ const createWarehouseReceiveDraft = async (req, res) => {
           product_customer.to_warehouse_id,
           receive_serial.route_id
         FROM tm_product_customers product_customer
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_customer.serial_id
+          AND product_active.serial_no = product_customer.serial_no
         LEFT JOIN tm_receive_serials receive_serial
           ON receive_serial.serial_id = product_customer.serial_id
           AND receive_serial.serial_no = product_customer.serial_no
@@ -45,7 +48,14 @@ const createWarehouseReceiveDraft = async (req, res) => {
       return res.status(404).json({ message: "ไม่พบ Serial No ในรายการรอรับเข้าคลัง" });
     }
 
-    const [warehouseRows] = await connection.query("SELECT id FROM tm_product_warehouses WHERE serial_no = ? LIMIT 1 FOR UPDATE", [serialNo]);
+    const [warehouseRows] = await connection.query(
+      `SELECT product_warehouse.id FROM tm_product_warehouses product_warehouse
+       INNER JOIN tm_product_actived product_active
+         ON product_active.serial_id = product_warehouse.serial_id
+         AND product_active.serial_no = product_warehouse.serial_no
+       WHERE product_warehouse.serial_no = ? LIMIT 1 FOR UPDATE`,
+      [serialNo],
+    );
 
     if (warehouseRows.length) {
       await connection.rollback();
@@ -152,6 +162,9 @@ export const getWarehouseReceiveSerials = async (req, res) => {
         product_customer.to_warehouse_id,
         wt.warehouse_name AS to_warehouse_name
       FROM tm_product_customers product_customer
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_customer.serial_id
+        AND product_active.serial_no = product_customer.serial_no
 
       LEFT JOIN mm_customers c
         ON c.id = product_customer.customer_id
@@ -186,6 +199,9 @@ export const getWarehouseReceiveSerials = async (req, res) => {
               temp_product.to_warehouse_id,
               destination.warehouse_name AS to_warehouse_name
             FROM tmp_product_warehouses temp_product
+            INNER JOIN tm_product_actived product_active
+              ON product_active.serial_id = temp_product.serial_id
+              AND product_active.serial_no = temp_product.serial_no
             LEFT JOIN tm_receive_serials receive_serial
               ON receive_serial.serial_id = temp_product.serial_id
               AND receive_serial.serial_no = temp_product.serial_no
@@ -268,12 +284,15 @@ export const createWarehouseReceive = async (req, res) => {
     if (action === "CONFIRM") {
       const [draftRows] = await connection.query(
         `
-          SELECT serial_no
-          FROM tmp_product_warehouses
-          WHERE action_type = 'WH_RECEIVE'
-            AND created_by = ?
-            AND now_warehouse_id = ?
-          ORDER BY id ASC
+          SELECT temp_product.serial_no
+          FROM tmp_product_warehouses temp_product
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = temp_product.serial_id
+            AND product_active.serial_no = temp_product.serial_no
+          WHERE temp_product.action_type = 'WH_RECEIVE'
+            AND temp_product.created_by = ?
+            AND temp_product.now_warehouse_id = ?
+          ORDER BY temp_product.id ASC
           FOR UPDATE
         `,
         [createdBy, warehouseId],
@@ -300,6 +319,9 @@ export const createWarehouseReceive = async (req, res) => {
           product_customer.to_warehouse_id,
           receive_serial.route_id
         FROM tm_product_customers product_customer
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_customer.serial_id
+          AND product_active.serial_no = product_customer.serial_no
         LEFT JOIN tm_receive_serials receive_serial
           ON receive_serial.serial_id = product_customer.serial_id
           AND receive_serial.serial_no = product_customer.serial_no
@@ -327,6 +349,9 @@ export const createWarehouseReceive = async (req, res) => {
         SELECT DISTINCT
           pw.serial_no
         FROM tm_product_warehouses pw
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = pw.serial_id
+          AND product_active.serial_no = pw.serial_no
         WHERE pw.serial_no IN (${placeholders})
       `,
       serialNos,
@@ -396,6 +421,9 @@ export const createWarehouseReceive = async (req, res) => {
           ?,
           ?
         FROM tm_product_warehouses pw
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = pw.serial_id
+          AND product_active.serial_no = pw.serial_no
         WHERE pw.serial_no IN (${placeholders})
       `,
       [createdBy, now, ...serialNos],
@@ -427,6 +455,9 @@ export const createWarehouseReceive = async (req, res) => {
           transaction_last.truck_name, transaction_last.truck_id, transaction_last.vehicle_contractor_id,
           transaction_last.truck_province, transaction_last.note, ?, ?
         FROM tm_product_transactions_last transaction_last
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = transaction_last.serial_id
+          AND product_active.serial_no = transaction_last.serial_no
         INNER JOIN um_users actor
           ON actor.id = ?
         LEFT JOIN mm_warehouses_to warehouse
@@ -439,6 +470,9 @@ export const createWarehouseReceive = async (req, res) => {
     await connection.query(
       `
         UPDATE tm_product_transactions_last transaction_last
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = transaction_last.serial_id
+          AND product_active.serial_no = transaction_last.serial_no
         INNER JOIN um_users actor
           ON actor.id = ?
         LEFT JOIN mm_warehouses_to warehouse
@@ -471,6 +505,9 @@ export const createWarehouseReceive = async (req, res) => {
       `
         DELETE product_customer
         FROM tm_product_customers product_customer
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_customer.serial_id
+          AND product_active.serial_no = product_customer.serial_no
         INNER JOIN tm_product_warehouses product_warehouse
           ON product_warehouse.serial_id = product_customer.serial_id
           AND product_warehouse.serial_no = product_customer.serial_no

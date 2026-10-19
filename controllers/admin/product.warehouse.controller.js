@@ -21,6 +21,9 @@ export const getProductWarehouses = async (req, res) => {
           AND EXISTS (
             SELECT 1
             FROM tm_product_warehouses matched_product
+            INNER JOIN tm_product_actived matched_active
+              ON matched_active.serial_id = matched_product.serial_id
+              AND matched_active.serial_no = matched_product.serial_no
             INNER JOIN tm_receive_serials matched_receive
               ON matched_receive.serial_id = matched_product.serial_id
               AND matched_receive.serial_no = matched_product.serial_no
@@ -45,6 +48,9 @@ export const getProductWarehouses = async (req, res) => {
 
     const fromAndWhere = `
       FROM tm_product_warehouses product_warehouse
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_warehouse.serial_id
+        AND product_active.serial_no = product_warehouse.serial_no
       INNER JOIN tm_receive_serials receive_serial
         ON receive_serial.serial_id = product_warehouse.serial_id
         AND receive_serial.serial_no = product_warehouse.serial_no
@@ -114,6 +120,9 @@ export const getProductWarehouses = async (req, res) => {
           SELECT receive_serial.receive_code, product_warehouse.serial_no,
             receive_serial.package_name, receive_serial.package_detail_name
           FROM tm_product_warehouses product_warehouse
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = product_warehouse.serial_id
+            AND product_active.serial_no = product_warehouse.serial_no
           INNER JOIN tm_receive_serials receive_serial
             ON receive_serial.serial_id = product_warehouse.serial_id
             AND receive_serial.serial_no = product_warehouse.serial_no

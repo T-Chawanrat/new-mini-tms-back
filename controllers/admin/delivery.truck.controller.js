@@ -137,6 +137,9 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
       INNER JOIN tm_product_trucks product_truck
         ON product_truck.serial_id = transaction_last.serial_id
         AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_truck.serial_id
+        AND product_active.serial_no = product_truck.serial_no
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
       INNER JOIN um_users actor
@@ -162,6 +165,9 @@ const writeDeliveryTruckTransactions = async ({ connection, truckLoadId, actorId
       INNER JOIN tm_product_trucks product_truck
         ON product_truck.serial_id = transaction_last.serial_id
         AND product_truck.serial_no = transaction_last.serial_no
+      INNER JOIN tm_product_actived product_active
+        ON product_active.serial_id = product_truck.serial_id
+        AND product_active.serial_no = product_truck.serial_no
       INNER JOIN tm_trucks truck
         ON truck.id = product_truck.truck_load_id
       INNER JOIN um_users actor
@@ -532,6 +538,9 @@ export const getDeliveryTruckProducts = async (req, res) => {
           product_truck.serial_no,
           receive_serial.recipient_name
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         LEFT JOIN tm_receive_serials receive_serial
           ON receive_serial.serial_id = product_truck.serial_id
           AND receive_serial.serial_no = product_truck.serial_no
@@ -721,7 +730,10 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
     );
 
     await connection.query(
-      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'`,
+      `UPDATE tm_product_trucks SET status = 'IN_TRANSIT' WHERE truck_load_id = ? AND status = 'LOADED'
+        AND EXISTS (SELECT 1 FROM tm_product_actived product_active
+          WHERE product_active.serial_id = tm_product_trucks.serial_id
+            AND product_active.serial_no = tm_product_trucks.serial_no)`,
       [truckLoadId],
     );
 
@@ -763,6 +775,9 @@ export const closeAndGoDeliveryTruck = async (req, res) => {
             NULL,
             ?
           FROM tm_product_trucks product_truck
+          INNER JOIN tm_product_actived product_active
+            ON product_active.serial_id = product_truck.serial_id
+            AND product_active.serial_no = product_truck.serial_no
           INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
           LEFT JOIN mm_vehicles vehicle ON vehicle.id = product_truck.truck_id
           LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
@@ -1001,6 +1016,9 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
           product_truck.truck_id, product_truck.status, truck.warehouse_id,
           truck.is_close, product_truck.route_id, receive_serial.to_warehouse_id
         FROM tm_product_trucks product_truck
+        INNER JOIN tm_product_actived product_active
+          ON product_active.serial_id = product_truck.serial_id
+          AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck ON truck.id = product_truck.truck_load_id
         LEFT JOIN tm_receive_serials receive_serial
           ON receive_serial.serial_id = product_truck.serial_id
@@ -1040,7 +1058,10 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
       [product.serial_id, product.serial_no, product.warehouse_id, product.to_warehouse_id, product.route_id, product.resend_date, actorId, now],
     );
 
-    await connection.query(`DELETE FROM tm_truck_details WHERE truck_load_id = ? AND serial_no = ?`, [truckLoadId, serialNo]);
+    await connection.query(`DELETE FROM tm_truck_details WHERE truck_load_id = ? AND serial_no = ?
+      AND EXISTS (SELECT 1 FROM tm_product_actived product_active
+        WHERE product_active.serial_id = tm_truck_details.serial_id
+          AND product_active.serial_no = tm_truck_details.serial_no)`, [truckLoadId, serialNo]);
     await connection.query(`DELETE FROM tm_product_trucks WHERE id = ?`, [product.id]);
 
     await insertProductWarehouseLog(connection, {

@@ -5,13 +5,14 @@ import { fileURLToPath } from "url";
 import db from "../../config/db.js";
 import { toNumberOrNull } from "../../utils/input.js";
 import { buildTruckVehicleSql } from "../../utils/truck.js";
+import { parseCoordinate } from "../../utils/location.js";
 import {
-  createDriverDeliveryTruck as createDriverDeliveryTruckAdmin,
-  getDeliveryTruckProducts as getDeliveryTruckProductsAdmin,
-  getDriverDeliveryTruckOptions as getDriverDeliveryTruckOptionsAdmin,
-  loadDeliveryTruckProduct as loadDeliveryTruckProductAdmin,
-  unloadDeliveryTruckProduct as unloadDeliveryTruckProductAdmin,
-} from "../admin/delivery.truck.controller.js";
+  createDriverDeliveryTruck as createTruck,
+  getDeliveryTruckProducts as getTruckProducts,
+  getDriverDeliveryTruckOptions as getTruckOptions,
+  loadDeliveryTruckProduct as loadTruckProduct,
+  unloadDeliveryTruckProduct as unloadTruckProduct,
+} from "./driver.delivery.truck.operations.controller.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDirectory = path.resolve(__dirname, "../../uploads");
@@ -41,22 +42,12 @@ const withOwnedDeliveryTruck = (handler) => async (req, res, next) => {
   }
 };
 
-// Reuse the proven transaction flow; ownership is enforced above for every truck endpoint.
-export const getDriverDeliveryTruckOptions = getDriverDeliveryTruckOptionsAdmin;
-export const createDriverDeliveryTruck = createDriverDeliveryTruckAdmin;
-export const getDriverDeliveryTruckProducts = withOwnedDeliveryTruck(getDeliveryTruckProductsAdmin);
-export const loadDriverDeliveryTruckProduct = withOwnedDeliveryTruck(loadDeliveryTruckProductAdmin);
-export const unloadDriverDeliveryTruckProduct = withOwnedDeliveryTruck(unloadDeliveryTruckProductAdmin);
-
-const toCoordinate = (value, min, max) => {
-  const numberValue = toNumberOrNull(value);
-  return numberValue === null || numberValue < min || numberValue > max ? null : numberValue;
-};
-
-const toAccuracy = (value) => {
-  const numberValue = toNumberOrNull(value);
-  return numberValue === null || numberValue < 0 ? null : numberValue;
-};
+// Check ownership before applying the driver-specific truck operations.
+export const getDriverDeliveryTruckOptions = getTruckOptions;
+export const createDriverDeliveryTruck = createTruck;
+export const getDriverDeliveryTruckProducts = withOwnedDeliveryTruck(getTruckProducts);
+export const loadDriverDeliveryTruckProduct = withOwnedDeliveryTruck(loadTruckProduct);
+export const unloadDriverDeliveryTruckProduct = withOwnedDeliveryTruck(unloadTruckProduct);
 
 const createClosedDeliveryTruckCode = async (connection, dateCode) => {
   const codePrefix = `DT-${dateCode}-`;
@@ -257,9 +248,9 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
     const actorId = getActorId(req);
     const warehouseId = getWarehouseId(req);
     const photo = req.file;
-    const latitude = toCoordinate(req.body.latitude, -90, 90);
-    const longitude = toCoordinate(req.body.longitude, -180, 180);
-    const accuracyM = toAccuracy(req.body.accuracy_m);
+    const latitude = parseCoordinate(req.body.latitude, -90, 90);
+    const longitude = parseCoordinate(req.body.longitude, -180, 180);
+    const accuracyM = parseCoordinate(req.body.accuracy_m, 0, Infinity);
 
     if (!truckLoadId || !actorId || !warehouseId) {
       return res.status(400).json({ success: false, message: "ข้อมูลใบรถกระจายไม่ถูกต้อง" });
@@ -267,10 +258,6 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
 
     if (!photo?.storedName) {
       return res.status(400).json({ success: false, message: "กรุณาถ่ายรูปปิดบรรทุก" });
-    }
-
-    if (latitude === null || longitude === null || accuracyM === null) {
-      return res.status(400).json({ success: false, message: "กรุณาเปิดตำแหน่งและอนุญาตสิทธิ์ตำแหน่งก่อนปิดบรรทุก" });
     }
 
     connection = await db.getConnection();
@@ -344,7 +331,7 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
         DATE_FORMAT(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+07:00'), '%Y%m') AS data_yearmonth
     `);
     const truckCode = await createClosedDeliveryTruckCode(connection, clock.date_code);
-    const relativeDirectory = path.posix.join("truck-closes", String(truckLoadId));
+    const relativeDirectory = path.posix.join("truck-closes", truckCode.replaceAll("-", ""));
     const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
     const absolutePath = path.join(absoluteDirectory, photo.storedName);
     const filePath = `/uploads/${relativeDirectory}/${photo.storedName}`;

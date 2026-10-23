@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 
-import { getImageFileExtension } from "../utils/file-url.js";
+import { getImageFileExtension, isSupportedImageMimeType } from "../utils/file-url.js";
 
 const uploadedFiles = (files) => {
   if (Array.isArray(files)) return files;
@@ -34,6 +34,14 @@ export const uploadTruckClosePhoto = multer({
 
     cb(null, true);
   },
+});
+
+export const uploadDriverDeliveryMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 9, fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => isSupportedImageMimeType(file.mimetype)
+    ? cb(null, true)
+    : cb(new Error("รองรับเฉพาะไฟล์รูปภาพ JPG, PNG และ WebP")),
 });
 
 const roStorage = multer.diskStorage({

@@ -408,7 +408,7 @@ export const getTruckLoadDrivers = async (req, res) => {
       WHERE role_id = 7
         AND COALESCE(employment_type, 'EMPLOYEE') = 'EMPLOYEE'
         AND COALESCE(is_active, 1) = 1
-      ORDER BY first_name ASC, last_name ASC, employee_code ASC
+      ORDER BY employee_code ASC
     `);
 
     return res.status(200).json({

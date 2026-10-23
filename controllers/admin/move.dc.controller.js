@@ -248,8 +248,7 @@ const confirmMoveDc = async (req, res) => {
           ON temp_product.serial_id = product_warehouse.serial_id
           AND temp_product.serial_no = product_warehouse.serial_no
         SET
-          product_warehouse.now_warehouse_id = temp_product.to_warehouse_id,
-          product_warehouse.to_warehouse_id = temp_product.to_warehouse_id
+          product_warehouse.now_warehouse_id = temp_product.to_warehouse_id
         WHERE temp_product.action_type = 'MOVE_DC'
           AND temp_product.created_by = ?
           AND temp_product.now_warehouse_id = ?

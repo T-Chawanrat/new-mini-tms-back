@@ -90,7 +90,7 @@ const getFromWarehouseNameSelectSql = () => {
 };
 
 const buildReceiveWhere = (query) => {
-  const { receive_date, customer_id, to_warehouse_id, receive_code, serial_no } = query;
+  const { receive_date, customer_id, to_warehouse_id, receive_code, serial_no, search } = query;
 
   const where = [];
   const params = [];
@@ -118,6 +118,10 @@ const buildReceiveWhere = (query) => {
 
   if (receive_code) {
     where.push(buildLike("rs.receive_code", receive_code));
+  }
+
+  if (search) {
+    where.push(`(${buildLike("rs.receive_code", search)} OR ${buildLike("rs.serial_no", search)})`);
   }
 
   if (serial_no) {

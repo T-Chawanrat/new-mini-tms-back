@@ -221,7 +221,7 @@ export const getDeliveryTruckOptions = async (req, res) => {
         WHERE role_id = 7
           AND COALESCE(employment_type, 'EMPLOYEE') = 'EMPLOYEE'
           AND COALESCE(is_active, 1) = 1
-        ORDER BY first_name, last_name
+        ORDER BY employee_code ASC
       `),
       db.query(`
         SELECT id, license_plate, license_plate_province, model

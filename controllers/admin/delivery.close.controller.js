@@ -130,8 +130,11 @@ export const getDeliveryCompletes = async (req, res) => {
           delivery_status.status_note,
           delivery_status.delivered_datetime
         FROM tm_receive_serials rs
-        LEFT JOIN tm_delivery_close delivery_status ON delivery_status.serial_id = rs.serial_id
-        WHERE ${currentReceiveSerialSql} AND ${billIsRelevantSql} AND (${billCondition})
+        LEFT JOIN tm_delivery_close delivery_status
+          ON delivery_status.serial_id = rs.serial_id AND delivery_status.serial_no = rs.serial_no
+        WHERE ${currentReceiveSerialSql}
+          AND (${billIsRelevantSql} OR delivery_status.delivery_status = 'COMPLETED')
+          AND (${billCondition})
         ORDER BY rs.receive_code, rs.serial_no
       `,
       billParams,

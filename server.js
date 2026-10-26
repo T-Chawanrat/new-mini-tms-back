@@ -1,5 +1,6 @@
 import fs from "fs";
 import https from "https";
+import http from "http";
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -24,6 +25,7 @@ import driverTruckRoutes from "./routes/driver/driver.truck.route.js";
 import driverDeliveryTruckRoutes from "./routes/driver/driver.delivery.truck.route.js";
 import driverDeliveriesRoutes from "./routes/driver/driver.deliveries.route.js";
 import driverMileageRoutes from "./routes/driver/driver.mileage.route.js";
+import driverDeliveryIssueRoutes from "./routes/driver/driver.delivery.issue.route.js";
 import dcReceiveRoutes from "./routes/admin/dc.receive.routes.js";
 import moveTkRoutes from "./routes/admin/move.tk.routes.js";
 import moveDtRoutes from "./routes/admin/move.dt.routes.js";
@@ -39,6 +41,7 @@ import oilPriceRoutes from "./routes/admin/oil-price.route.js";
 import announcementRoutes from "./routes/admin/announcement.route.js";
 import logRoutes from "./routes/admin/log.route.js";
 import { error } from "./middlewares/error.js";
+import { initializeSocketServer } from "./services/realtime/socket.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,6 +79,7 @@ app.use("/driver/trucks", driverTruckRoutes);
 app.use("/driver/delivery-trucks", driverDeliveryTruckRoutes);
 app.use("/driver/deliveries", driverDeliveriesRoutes);
 app.use("/driver/mileage", driverMileageRoutes);
+app.use("/driver/delivery-issues", driverDeliveryIssueRoutes);
 app.use("/delivery-trucks", deliveryTruckRoutes);
 app.use("/delivery-closes", deliveryCloseRoutes);
 app.use("/delivery-close-media", deliveryCloseMediaRoutes);
@@ -112,6 +116,8 @@ app.use(error);
 // });
 
 const PORT = process.env.PORT || 8001;
-app.listen(PORT, () => {
+const httpServer = http.createServer(app);
+initializeSocketServer(httpServer);
+httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

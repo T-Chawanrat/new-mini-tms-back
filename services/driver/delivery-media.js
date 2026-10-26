@@ -5,23 +5,25 @@ import { fileURLToPath } from "url";
 const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../uploads");
 
 export const saveDriverDeliveryMedia = async ({ connection, bills, proof, signature, createdFiles, driverId, now }) => {
-for (const bill of bills) {
+  for (const bill of bills) {
       // Serialize partial closes of the same bill before checking its media limit.
       await connection.query(
-        `SELECT serial_id FROM tm_receive_serials WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? AND receive_code = ? FOR UPDATE`,
-        [bill.receive_business_id, bill.receive_walkin_id, bill.receive_code],
+        `SELECT serial_id FROM tm_receive_serials
+         WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? FOR UPDATE`,
+        [bill.receive_business_id, bill.receive_walkin_id],
       );
-      const folder = String(bill.receive_code || "")
-        .replace(/[^a-zA-Z0-9]/g, "")
-        .slice(0, 80);
-      if (!folder) {
+      const sourceId = bill.receive_business_id ?? bill.receive_walkin_id;
+      const sourceType = bill.receive_business_id !== null && bill.receive_business_id !== undefined ? "business" : "walkin";
+      if (!sourceId) {
         const error = new Error("เลขบิลไม่ถูกต้อง");
         error.status = 400;
         throw error;
       }
+      const folder = `${sourceType}-${sourceId}`;
       const [existing] = await connection.query(
-        `SELECT media_type FROM tm_delivery_close_media WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? AND receive_code = ? AND is_deleted = 0 FOR UPDATE`,
-        [bill.receive_business_id, bill.receive_walkin_id, bill.receive_code],
+        `SELECT media_type FROM tm_delivery_close_media
+         WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? AND is_deleted = 0 FOR UPDATE`,
+        [bill.receive_business_id, bill.receive_walkin_id],
       );
       const proofCount = existing.filter((row) => row.media_type === "PROOF_IMAGE").length;
       const signCount = existing.filter((row) => row.media_type === "SIGNATURE_IMAGE").length;
@@ -61,6 +63,6 @@ for (const bill of bills) {
           );
         }
       }
-    }
-    };
+  }
+};
 

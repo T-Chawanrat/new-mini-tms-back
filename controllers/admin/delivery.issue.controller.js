@@ -4,13 +4,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import sharp from "sharp";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
+import { emitDeliveryIssue, emitDeliveryIssueInbox, emitDriverDeliveryIssueInbox } from "../../services/realtime/socket.js";
 
-const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads");
+const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../uploads");
 const actorIdOf = (req) => toNumberOrNull(req.user?.id ?? req.user?.user_id);
-const safeFolder = (value) =>
-  String(value || "")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 80);
 const imageFiles = (req) => (Array.isArray(req.files?.images) ? req.files.images : []);
 const thumbnailPathOf = (filePath) => {
   const parsed = path.posix.parse(filePath);
@@ -22,22 +19,21 @@ const writeChatThumbnail = (source, destination) =>
 export const createDeliveryIssue = async (req, res) => {
   try {
     const actorId = actorIdOf(req);
-    const receiveCode = cleanText(req.params.receiveCode)?.slice(0, 50);
     const receiveBusinessId = toNumberOrNull(req.body?.receive_business_id);
     const receiveWalkinId = toNumberOrNull(req.body?.receive_walkin_id);
     const issueType = cleanText(req.body?.issue_type)?.slice(0, 100) || "แจ้งปัญหาการจัดส่ง";
-    if (!actorId || !receiveCode || (receiveBusinessId === null && receiveWalkinId === null))
+    if (!actorId || (receiveBusinessId === null) === (receiveWalkinId === null))
       return res.status(400).json({ success: false, message: "ข้อมูลบิลไม่ถูกต้อง" });
     const [[existing]] = await db.query(
       `SELECT delivery_issue_id FROM tm_delivery_issues
-       WHERE receive_code = ? AND receive_business_id <=> ? AND receive_walkin_id <=> ? LIMIT 1`,
-      [receiveCode, receiveBusinessId, receiveWalkinId],
+       WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? LIMIT 1`,
+      [receiveBusinessId, receiveWalkinId],
     );
     if (existing) return res.status(200).json({ success: true, data: { delivery_issue_id: existing.delivery_issue_id, created: false } });
     const [[bill]] = await db.query(
-      `SELECT 1 FROM tm_receive_serials
-       WHERE receive_code = ? AND receive_business_id <=> ? AND receive_walkin_id <=> ? LIMIT 1`,
-      [receiveCode, receiveBusinessId, receiveWalkinId],
+      `SELECT receive_code FROM tm_receive_serials
+       WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? LIMIT 1`,
+      [receiveBusinessId, receiveWalkinId],
     );
     if (!bill) return res.status(404).json({ success: false, message: "ไม่พบเลขที่บิล" });
     const now = new Date();
@@ -46,8 +42,10 @@ export const createDeliveryIssue = async (req, res) => {
          receive_business_id, receive_walkin_id, receive_code,
          issue_type, issue_status, created_by, created_date, updated_by, updated_date
        ) VALUES (?, ?, ?, ?, 'NEW', ?, ?, ?, ?)`,
-      [receiveBusinessId, receiveWalkinId, receiveCode, issueType, actorId, now, actorId, now],
+      [receiveBusinessId, receiveWalkinId, bill.receive_code, issueType, actorId, now, actorId, now],
     );
+    emitDeliveryIssueInbox({ issueId: result.insertId });
+    void emitDriverDeliveryIssueInbox(result.insertId, { issueId: result.insertId });
     return res.status(201).json({ success: true, data: { delivery_issue_id: result.insertId, created: true } });
   } catch (error) {
     console.error("createDeliveryIssue error:", error);
@@ -60,7 +58,7 @@ export const getDeliveryIssueThreads = async (req, res) => {
     const actorId = actorIdOf(req);
     const [rows] = await db.query(
       `SELECT
-         issue.receive_code,
+         issue.delivery_issue_id, issue.receive_code,
          issue.issue_type,
          issue.issue_status,
          TRIM(CONCAT_WS(' ', NULLIF(driver.first_name, ''), NULLIF(driver.last_name, ''))) AS driver_name,
@@ -72,7 +70,6 @@ export const getDeliveryIssueThreads = async (req, res) => {
        LEFT JOIN tm_delivery_messages message ON message.delivery_issue_id = issue.delivery_issue_id
        LEFT JOIN tm_delivery_message_reads message_read
          ON message_read.delivery_status_message_id = message.delivery_status_message_id AND message_read.user_id = ?
-       WHERE issue.receive_code IS NOT NULL AND TRIM(issue.receive_code) <> ''
        GROUP BY issue.delivery_issue_id, issue.receive_code, issue.issue_type, issue.issue_status, driver.first_name, driver.last_name
        ORDER BY updated_at DESC`,
       [actorId, actorId],
@@ -86,28 +83,29 @@ export const getDeliveryIssueThreads = async (req, res) => {
 
 export const getDeliveryIssueMessages = async (req, res) => {
   const actorId = actorIdOf(req);
-  const receiveCode = cleanText(req.params.receiveCode)?.slice(0, 50);
-  if (!actorId || !receiveCode) return res.status(400).json({ success: false, message: "receive_code ไม่ถูกต้อง" });
+  const deliveryIssueId = toNumberOrNull(req.params.deliveryIssueId);
+  if (!actorId || !Number.isInteger(deliveryIssueId) || deliveryIssueId <= 0) return res.status(400).json({ success: false, message: "ข้อมูลเคสไม่ถูกต้อง" });
   const now = new Date();
   try {
     const [[bill]] = await db.query(
       `SELECT issue.delivery_issue_id, issue.receive_code, issue.issue_type, issue.issue_status, MAX(receive_serial.recipient_name) AS recipient_name
        FROM tm_delivery_issues issue
        LEFT JOIN tm_receive_serials receive_serial
-         ON receive_serial.receive_code = issue.receive_code
-        AND receive_serial.receive_business_id <=> issue.receive_business_id
+         ON receive_serial.receive_business_id <=> issue.receive_business_id
         AND receive_serial.receive_walkin_id <=> issue.receive_walkin_id
-       WHERE issue.receive_code = ?
+       WHERE issue.delivery_issue_id = ?
        GROUP BY issue.delivery_issue_id, issue.receive_code, issue.issue_type, issue.issue_status`,
-      [receiveCode],
+      [deliveryIssueId],
     );
     if (!bill) return res.status(404).json({ success: false, message: "ไม่พบเลขที่บิล" });
 
     const [messages] = await db.query(
       `SELECT message.delivery_status_message_id, message.sender_user_id, message.message_text, message.created_date,
-              TRIM(CONCAT_WS(' ', NULLIF(sender.first_name, ''), NULLIF(sender.last_name, ''))) AS sender_name, sender.username
+              TRIM(CONCAT_WS(' ', NULLIF(sender.first_name, ''), NULLIF(sender.last_name, ''))) AS sender_name,
+              sender.username, sender_role.name AS role_name
        FROM tm_delivery_messages message
        LEFT JOIN um_users sender ON sender.id = message.sender_user_id
+       LEFT JOIN mm_roles sender_role ON sender_role.id = sender.role_id
        WHERE message.delivery_issue_id = ?
        ORDER BY message.created_date, message.delivery_status_message_id`,
       [bill.delivery_issue_id],
@@ -153,7 +151,7 @@ export const getDeliveryIssueMessages = async (req, res) => {
       success: true,
       data: {
         thread: {
-          receive_code: bill.receive_code,
+          delivery_issue_id: bill.delivery_issue_id, receive_code: bill.receive_code,
           issue_type: bill.issue_type,
           issue_status: bill.issue_status,
           recipient_name: bill.recipient_name || "-",
@@ -175,16 +173,16 @@ export const createDeliveryIssueMessage = async (req, res) => {
   let connection;
   const createdFiles = [];
   const actorId = actorIdOf(req);
-  const receiveCode = cleanText(req.params.receiveCode)?.slice(0, 50);
+  const deliveryIssueId = toNumberOrNull(req.params.deliveryIssueId);
   const messageText = cleanText(req.body.message_text)?.slice(0, 10000) || null;
   const files = imageFiles(req);
-  if (!actorId || !receiveCode || (!messageText && !files.length))
+  if (!actorId || !Number.isInteger(deliveryIssueId) || deliveryIssueId <= 0 || (!messageText && !files.length))
     return res.status(400).json({ success: false, message: "กรุณาระบุข้อความหรือรูปภาพ" });
   try {
     connection = await db.getConnection();
     await connection.beginTransaction();
     const now = new Date();
-    const [[issue]] = await connection.query(`SELECT delivery_issue_id FROM tm_delivery_issues WHERE receive_code = ? LIMIT 1`, [receiveCode]);
+    const [[issue]] = await connection.query(`SELECT delivery_issue_id FROM tm_delivery_issues WHERE delivery_issue_id = ? LIMIT 1`, [deliveryIssueId]);
     if (!issue) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: "ไม่พบเคสแจ้งปัญหานี้" });
@@ -194,7 +192,7 @@ export const createDeliveryIssueMessage = async (req, res) => {
       [issue.delivery_issue_id, actorId, messageText, now],
     );
     const messageId = result.insertId;
-    const relativeDirectory = path.posix.join("delivery-issues", safeFolder(receiveCode), "chat");
+    const relativeDirectory = path.posix.join("delivery-issues", String(issue.delivery_issue_id), "chat");
     const absoluteDirectory = path.join(uploadsDirectory, ...relativeDirectory.split("/"));
     await fs.mkdir(absoluteDirectory, { recursive: true });
     for (const file of files) {
@@ -213,6 +211,10 @@ export const createDeliveryIssueMessage = async (req, res) => {
       );
     }
     await connection.commit();
+    const payload = { issueId: issue.delivery_issue_id };
+    emitDeliveryIssue(issue.delivery_issue_id, "delivery-issue:message", payload);
+    emitDeliveryIssueInbox(payload);
+    void emitDriverDeliveryIssueInbox(issue.delivery_issue_id, payload);
     res.status(201).json({ success: true, data: { delivery_status_message_id: messageId } });
   } catch (error) {
     await connection?.rollback();
@@ -227,17 +229,23 @@ export const createDeliveryIssueMessage = async (req, res) => {
 export const updateDeliveryIssueStatus = async (req, res) => {
   try {
     const actorId = actorIdOf(req);
-    const receiveCode = cleanText(req.params.receiveCode)?.slice(0, 50);
+    const deliveryIssueId = toNumberOrNull(req.params.deliveryIssueId);
     const issueStatus = cleanText(req.body?.issue_status)?.toUpperCase();
-    if (!actorId || !receiveCode || !["NEW", "IN_PROGRESS", "RESOLVED"].includes(issueStatus))
+    if (!actorId || !Number.isInteger(deliveryIssueId) || deliveryIssueId <= 0 || !["NEW", "IN_PROGRESS", "RESOLVED"].includes(issueStatus))
       return res.status(400).json({ success: false, message: "สถานะไม่ถูกต้อง" });
-    const [result] = await db.query(`UPDATE tm_delivery_issues SET issue_status = ?, updated_by = ?, updated_date = ? WHERE receive_code = ?`, [
+    const [[issue]] = await db.query("SELECT delivery_issue_id FROM tm_delivery_issues WHERE delivery_issue_id = ? LIMIT 1", [deliveryIssueId]);
+    if (!issue) return res.status(404).json({ success: false, message: "ไม่พบเคสแจ้งปัญหา" });
+    const [result] = await db.query(`UPDATE tm_delivery_issues SET issue_status = ?, updated_by = ?, updated_date = ? WHERE delivery_issue_id = ?`, [
       issueStatus,
       actorId,
       new Date(),
-      receiveCode,
+      issue.delivery_issue_id,
     ]);
     if (!result.affectedRows) return res.status(404).json({ success: false, message: "ไม่พบเคสแจ้งปัญหา" });
+    const payload = { issueId: issue.delivery_issue_id, issueStatus };
+    emitDeliveryIssue(issue.delivery_issue_id, "delivery-issue:status", payload);
+    emitDeliveryIssueInbox(payload);
+    void emitDriverDeliveryIssueInbox(issue.delivery_issue_id, payload);
     return res.json({ success: true, data: { issue_status: issueStatus } });
   } catch (error) {
     console.error("updateDeliveryIssueStatus error:", error);

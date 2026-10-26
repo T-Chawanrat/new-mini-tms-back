@@ -6,7 +6,11 @@ import { parseCoordinate } from "../../utils/location.js";
 import { saveDriverDeliveryMedia } from "../../services/driver/delivery-media.js";
 import { saveDriverDeliveryTransactions } from "../../services/driver/delivery-transaction.js";
 
-const billKeyOf = (row) => JSON.stringify([row.receive_business_id, row.receive_walkin_id, row.receive_code]);
+const billKeyOf = (row) => {
+  const businessId = toNumberOrNull(row.receive_business_id);
+  const walkinId = toNumberOrNull(row.receive_walkin_id);
+  return businessId ? `BUSINESS:${businessId}` : `WALKIN:${walkinId}`;
+};
 const recipientKeyOf = (row) => {
   const address = [row.address, row.subdistrict_name, row.district_name, row.province_name, row.zip_code].map((part) => String(part ?? "").trim());
   const detailId = toNumberOrNull(row.recipient_detail_id);
@@ -75,10 +79,10 @@ export const getDriverDeliveries = async (req, res) => {
     const billRows = [...new Map(rows.map((row) => [billKeyOf(row), row])).values()];
     const mediaByBill = new Map();
     if (billRows.length) {
-      const condition = billRows.map(() => "(receive_business_id <=> ? AND receive_walkin_id <=> ? AND receive_code = ?)").join(" OR ");
+      const condition = billRows.map(() => "(receive_business_id <=> ? AND receive_walkin_id <=> ?)").join(" OR ");
       const [media] = await db.query(
-        `SELECT receive_business_id, receive_walkin_id, receive_code, media_type, file_path FROM tm_delivery_close_media WHERE is_deleted = 0 AND (${condition})`,
-        billRows.flatMap((row) => [row.receive_business_id, row.receive_walkin_id, row.receive_code]),
+        `SELECT receive_business_id, receive_walkin_id, media_type, file_path FROM tm_delivery_close_media WHERE is_deleted = 0 AND (${condition})`,
+        billRows.flatMap((row) => [row.receive_business_id, row.receive_walkin_id]),
       );
       for (const item of media) {
         const key = billKeyOf(item);
@@ -121,6 +125,8 @@ export const getDriverDeliveries = async (req, res) => {
         recipient.bills.set(billKey, {
           key: billKey,
           receiveCode: row.receive_code,
+          receiveBusinessId: row.receive_business_id,
+          receiveWalkinId: row.receive_walkin_id,
           serials: [],
           remarks: new Set(),
           media: mediaByBill.get(billKey) || { proof: [], signatures: [] },

@@ -17,6 +17,88 @@ const recipientKeyOf = (row) => {
   return detailId ? JSON.stringify(["detail", detailId, ...address]) : JSON.stringify(["bill", billKeyOf(row)]);
 };
 
+const buildDriverDeliveries = async (rows) => {
+  const billRows = [...new Map(rows.map((row) => [billKeyOf(row), row])).values()];
+  const mediaByBill = new Map();
+  if (billRows.length) {
+    const condition = billRows.map(() => "(receive_business_id <=> ? AND receive_walkin_id <=> ?)").join(" OR ");
+    const [media] = await db.query(
+      `SELECT receive_business_id, receive_walkin_id, media_type, file_path FROM tm_delivery_close_media WHERE is_deleted = 0 AND (${condition})`,
+      billRows.flatMap((row) => [row.receive_business_id, row.receive_walkin_id]),
+    );
+    for (const item of media) {
+      const key = billKeyOf(item);
+      if (!mediaByBill.has(key)) mediaByBill.set(key, { proof: [], signatures: [] });
+      if (item.media_type === "PROOF_IMAGE") mediaByBill.get(key).proof.push(item.file_path);
+      if (item.media_type === "SIGNATURE_IMAGE") mediaByBill.get(key).signatures.push(item.file_path);
+    }
+  }
+
+  const recipients = new Map();
+  const serials = new Set();
+  const bills = new Set();
+  const trucks = new Set();
+  for (const row of rows) {
+    const completed = row.truck_product_status === "DELIVERED";
+    if (!completed) trucks.add(row.truck_load_id);
+    const serialKey = JSON.stringify([row.serial_id, row.serial_no]);
+    if (serials.has(serialKey)) continue;
+    serials.add(serialKey);
+
+    const billKey = billKeyOf(row);
+    if (!completed) bills.add(billKey);
+    const addressParts = [row.address, row.subdistrict_name, row.district_name, row.province_name, row.zip_code].map((part) =>
+      String(part ?? "").trim(),
+    );
+    const groupKey = recipientKeyOf(row);
+    if (!recipients.has(groupKey)) {
+      recipients.set(groupKey, {
+        key: groupKey,
+        recipientDetailId: toNumberOrNull(row.recipient_detail_id),
+        name: row.recipient_name || "ไม่ระบุผู้รับ",
+        address: addressParts.filter(Boolean).join(" ") || "ไม่ระบุที่อยู่",
+        phones: new Set(),
+        bills: new Map(),
+        serialCount: 0,
+      });
+    }
+    const recipient = recipients.get(groupKey);
+    const phone = String(row.tel ?? "").trim();
+    if (phone) recipient.phones.add(phone);
+    if (!recipient.bills.has(billKey)) {
+      recipient.bills.set(billKey, {
+        key: billKey,
+        receiveCode: row.receive_code,
+        receiveBusinessId: row.receive_business_id,
+        receiveWalkinId: row.receive_walkin_id,
+        serials: [],
+        remarks: new Set(),
+        media: mediaByBill.get(billKey) || { proof: [], signatures: [] },
+      });
+    }
+    const bill = recipient.bills.get(billKey);
+    bill.serials.push({ id: row.serial_id, serialNo: row.serial_no, completed });
+    const remark = String(row.remark ?? "").trim();
+    if (remark) bill.remarks.add(remark);
+    if (!completed) recipient.serialCount += 1;
+  }
+
+  return {
+    recipientCount: [...recipients.values()].filter((recipient) => recipient.serialCount > 0).length,
+    billCount: bills.size,
+    serialCount: [...recipients.values()].reduce((count, recipient) => count + recipient.serialCount, 0),
+    truckCount: trucks.size,
+    recipients: [...recipients.values()]
+      .filter((recipient) => recipient.serialCount > 0)
+      .map(({ bills: recipientBills, phones, ...recipient }) => ({
+        ...recipient,
+        phones: [...phones],
+        billCount: recipientBills.size,
+        bills: [...recipientBills.values()].map(({ remarks, ...bill }) => ({ ...bill, remarks: [...remarks] })),
+      })),
+  };
+};
+
 export const getDriverDeliverySummary = async (req, res) => {
   try {
     const driverId = toNumberOrNull(req.user?.id);
@@ -51,6 +133,20 @@ export const getDriverDeliveries = async (req, res) => {
     if (!driverId || !warehouseId) {
       return res.status(400).json({ success: false, message: "ข้อมูลผู้ขับรถไม่ถูกต้อง" });
     }
+    const recipientDetailId = toNumberOrNull(req.query.recipient_detail_id);
+    const receiveBusinessId = toNumberOrNull(req.query.receive_business_id);
+    const receiveWalkinId = toNumberOrNull(req.query.receive_walkin_id);
+    const hasRecipientFilter = "recipient_detail_id" in req.query || "receive_business_id" in req.query || "receive_walkin_id" in req.query;
+    if (hasRecipientFilter && !recipientDetailId && !receiveBusinessId && !receiveWalkinId) {
+      return res.status(400).json({ success: false, message: "ข้อมูลผู้รับไม่ถูกต้อง" });
+    }
+    const recipientFilter = recipientDetailId
+      ? { sql: " AND rs.recipient_detail_id = ?", params: [recipientDetailId] }
+      : receiveBusinessId
+        ? { sql: " AND rs.receive_business_id = ?", params: [receiveBusinessId] }
+        : receiveWalkinId
+          ? { sql: " AND rs.receive_walkin_id = ?", params: [receiveWalkinId] }
+          : { sql: "", params: [] };
 
     const [rows] = await db.query(
       `SELECT truck.id AS truck_load_id, rs.receive_business_id, rs.receive_walkin_id, rs.receive_code,
@@ -72,88 +168,16 @@ export const getDriverDeliveries = async (req, res) => {
            OR (product.status = 'DELIVERED' AND active.serial_id IS NULL AND close_status.serial_id IS NOT NULL))
          AND (rs.item_is_deleted IS NULL OR rs.item_is_deleted = '' OR rs.item_is_deleted = '0'
               OR LOWER(rs.item_is_deleted) IN ('false', 'n', 'no'))
+       ${recipientFilter.sql}
        ORDER BY rs.recipient_name, rs.receive_code, rs.serial_no, CASE WHEN product.status = 'IN_TRANSIT' THEN 0 ELSE 1 END`,
-      [driverId, warehouseId],
+      [driverId, warehouseId, ...recipientFilter.params],
     );
 
-    const billRows = [...new Map(rows.map((row) => [billKeyOf(row), row])).values()];
-    const mediaByBill = new Map();
-    if (billRows.length) {
-      const condition = billRows.map(() => "(receive_business_id <=> ? AND receive_walkin_id <=> ?)").join(" OR ");
-      const [media] = await db.query(
-        `SELECT receive_business_id, receive_walkin_id, media_type, file_path FROM tm_delivery_close_media WHERE is_deleted = 0 AND (${condition})`,
-        billRows.flatMap((row) => [row.receive_business_id, row.receive_walkin_id]),
-      );
-      for (const item of media) {
-        const key = billKeyOf(item);
-        if (!mediaByBill.has(key)) mediaByBill.set(key, { proof: [], signatures: [] });
-        if (item.media_type === "PROOF_IMAGE") mediaByBill.get(key).proof.push(item.file_path);
-        if (item.media_type === "SIGNATURE_IMAGE") mediaByBill.get(key).signatures.push(item.file_path);
-      }
+    const data = await buildDriverDeliveries(rows);
+    if (hasRecipientFilter && data.recipients.length !== 1) {
+      return res.status(404).json({ success: false, message: "ไม่พบข้อมูลผู้รับที่กำลังนำจ่าย" });
     }
-    const recipients = new Map();
-    const serials = new Set();
-    const bills = new Set();
-    const trucks = new Set();
-    for (const row of rows) {
-      const completed = row.truck_product_status === "DELIVERED";
-      if (!completed) trucks.add(row.truck_load_id);
-      const serialKey = JSON.stringify([row.serial_id, row.serial_no]);
-      if (serials.has(serialKey)) continue;
-      serials.add(serialKey);
-
-      const billKey = billKeyOf(row);
-      if (!completed) bills.add(billKey);
-      const addressParts = [row.address, row.subdistrict_name, row.district_name, row.province_name, row.zip_code].map((part) =>
-        String(part ?? "").trim(),
-      );
-      const groupKey = recipientKeyOf(row);
-      if (!recipients.has(groupKey)) {
-        recipients.set(groupKey, {
-          key: groupKey,
-          name: row.recipient_name || "ไม่ระบุผู้รับ",
-          address: addressParts.filter(Boolean).join(" ") || "ไม่ระบุที่อยู่",
-          phones: new Set(),
-          bills: new Map(),
-          serialCount: 0,
-        });
-      }
-      const recipient = recipients.get(groupKey);
-      const phone = String(row.tel ?? "").trim();
-      if (phone) recipient.phones.add(phone);
-      if (!recipient.bills.has(billKey)) {
-        recipient.bills.set(billKey, {
-          key: billKey,
-          receiveCode: row.receive_code,
-          receiveBusinessId: row.receive_business_id,
-          receiveWalkinId: row.receive_walkin_id,
-          serials: [],
-          remarks: new Set(),
-          media: mediaByBill.get(billKey) || { proof: [], signatures: [] },
-        });
-      }
-      const bill = recipient.bills.get(billKey);
-      bill.serials.push({ id: row.serial_id, serialNo: row.serial_no, completed });
-      const remark = String(row.remark ?? "").trim();
-      if (remark) bill.remarks.add(remark);
-      if (!completed) recipient.serialCount += 1;
-    }
-
-    return res.json({
-      success: true,
-      data: {
-        recipientCount: [...recipients.values()].filter((recipient) => recipient.serialCount > 0).length,
-        billCount: bills.size,
-        serialCount: [...recipients.values()].reduce((count, recipient) => count + recipient.serialCount, 0),
-        truckCount: trucks.size,
-        recipients: [...recipients.values()].filter((recipient) => recipient.serialCount > 0).map(({ bills: recipientBills, phones, ...recipient }) => ({
-          ...recipient,
-          phones: [...phones],
-          billCount: recipientBills.size,
-          bills: [...recipientBills.values()].map(({ remarks, ...bill }) => ({ ...bill, remarks: [...remarks] })),
-        })),
-      },
-    });
+    return res.json({ success: true, data });
   } catch (error) {
     console.error("getDriverDeliveries error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการสินค้าบนรถได้" });
@@ -189,10 +213,7 @@ export const completeDriverDeliveries = async (req, res) => {
     const lat = parseCoordinate(req.body.lat, -90, 90, false);
     const lng = parseCoordinate(req.body.lng, -180, 180, false);
     const accuracy = parseCoordinate(req.body.accuracy_m, 0, 999999.99, false);
-    if (
-      [lat, lng, accuracy].includes(false) ||
-      ([lat, lng, accuracy].some((v) => v === null) && ![lat, lng, accuracy].every((v) => v === null))
-    ) {
+    if ([lat, lng, accuracy].includes(false) || ([lat, lng, accuracy].some((v) => v === null) && ![lat, lng, accuracy].every((v) => v === null))) {
       return res.status(400).json({ success: false, message: "ข้อมูลพิกัดไม่ถูกต้อง" });
     }
     const proof = req.files?.proof_images || [];
@@ -245,7 +266,7 @@ export const completeDriverDeliveries = async (req, res) => {
     const now = new Date();
     await saveDriverDeliveryMedia({ connection, bills, proof, signature, createdFiles, driverId, now });
     await saveDriverDeliveryTransactions({ connection, products, now, lat, lng, accuracy, driverId, warehouseId });
-await connection.commit();
+    await connection.commit();
     committed = true;
     return res.json({ success: true, message: "บันทึกการจัดส่งสำเร็จ" });
   } catch (error) {
@@ -259,5 +280,3 @@ await connection.commit();
     connection?.release();
   }
 };
-
-

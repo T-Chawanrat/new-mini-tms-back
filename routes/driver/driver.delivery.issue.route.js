@@ -2,7 +2,7 @@ import express from "express";
 
 import { auth } from "../../middlewares/auth.js";
 import { assignStoredImageNames, uploadDriverDeliveryMedia } from "../../middlewares/upload.js";
-import { createDriverDeliveryIssue, createDriverDeliveryIssueMessage, getDriverDeliveryIssueByReceive, getDriverDeliveryIssueMessages, getDriverDeliveryIssueReasons, getDriverDeliveryIssueThreads } from "../../controllers/driver/driver.delivery.issue.controller.js";
+import { createDriverDeliveryIssue, createDriverDeliveryIssueMessage, getDriverDeliveryIssueByReceive, getDriverDeliveryIssueMessages, getDriverDeliveryIssueReasons, getDriverDeliveryIssueThreads } from "../../controllers/driver/driver.issue.controller.js";
 
 const router = express.Router();
 

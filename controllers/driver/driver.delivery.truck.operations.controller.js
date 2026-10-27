@@ -163,57 +163,34 @@ export const getDeliveryTruckProducts = async (req, res) => {
       return res.status(404).json({ success: false, message: "ไม่พบใบรถกระจาย" });
     }
 
-    const [rows] = await db.query(
-      `
-        SELECT
-          product_warehouse.id AS product_warehouse_id,
-          product_warehouse.serial_id,
-          product_warehouse.serial_no,
-          product_warehouse.now_warehouse_id,
-          product_warehouse.to_warehouse_id,
-          product_warehouse.route_id,
-          receive_serial.customer_id,
-          customer.name AS customer_name,
-          receive_serial.recipient_name
-        FROM tm_product_warehouses product_warehouse
-        INNER JOIN tm_product_actived product_active
-          ON product_active.serial_id = product_warehouse.serial_id
+    const [[pendingRows], [loadedRows]] = await Promise.all([
+      db.query(
+        `SELECT product_warehouse.serial_id, product_warehouse.serial_no
+         FROM tm_product_warehouses product_warehouse
+         INNER JOIN tm_product_actived product_active
+           ON product_active.serial_id = product_warehouse.serial_id
           AND product_active.serial_no = product_warehouse.serial_no
-        LEFT JOIN tm_receive_serials receive_serial
-          ON receive_serial.serial_id = product_warehouse.serial_id
-          AND receive_serial.serial_no = product_warehouse.serial_no
-        LEFT JOIN mm_customers customer
-          ON customer.id = receive_serial.customer_id
-        WHERE product_warehouse.now_warehouse_id = ?
-          AND product_warehouse.to_warehouse_id = ?
-          AND product_warehouse.route_id = ?
-          AND NULLIF(TRIM(product_warehouse.serial_no), '') IS NOT NULL
-        ORDER BY product_warehouse.id ASC
-      `,
-      [truck.warehouse_id, truck.warehouse_id, truck.route_id],
-    );
-
-    const [loadedRows] = await db.query(
-      `
-        SELECT
-          product_truck.serial_id,
-          product_truck.serial_no,
-          receive_serial.recipient_name
-        FROM tm_product_trucks product_truck
-        INNER JOIN tm_product_actived product_active
-          ON product_active.serial_id = product_truck.serial_id
+         WHERE product_warehouse.now_warehouse_id = ?
+           AND product_warehouse.to_warehouse_id = ?
+           AND product_warehouse.route_id = ?
+           AND NULLIF(TRIM(product_warehouse.serial_no), '') IS NOT NULL
+         ORDER BY product_warehouse.id ASC`,
+        [truck.warehouse_id, truck.warehouse_id, truck.route_id],
+      ),
+      db.query(
+        `SELECT product_truck.serial_id, product_truck.serial_no
+         FROM tm_product_trucks product_truck
+         INNER JOIN tm_product_actived product_active
+           ON product_active.serial_id = product_truck.serial_id
           AND product_active.serial_no = product_truck.serial_no
-        LEFT JOIN tm_receive_serials receive_serial
-          ON receive_serial.serial_id = product_truck.serial_id
-          AND receive_serial.serial_no = product_truck.serial_no
-        WHERE product_truck.truck_load_id = ?
-          AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
-        ORDER BY product_truck.id DESC
-      `,
-      [truckLoadId],
-    );
+         WHERE product_truck.truck_load_id = ?
+           AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
+         ORDER BY product_truck.id DESC`,
+        [truckLoadId],
+      ),
+    ]);
 
-    res.json({ success: true, data: rows, loaded: loadedRows });
+    res.json({ success: true, data: pendingRows, loaded: loadedRows });
   } catch (error) {
     console.error("getDeliveryTruckProducts error:", error);
     res.status(500).json({ success: false, message: "ไม่สามารถโหลดรายการสินค้าในคลังได้" });

@@ -1,5 +1,5 @@
 import express from "express";
-import { getDriverDeliveries, getDriverDeliverySummary, completeDriverDeliveries } from "../../controllers/driver/driver.deliveries.controller.js";
+import { completeDriverDeliveries, getDriverDeliveries, getDriverDeliverySummary } from "../../controllers/driver/driver.deliveries.controller.js";
 import { auth } from "../../middlewares/auth.js";
 import { assignStoredImageNames, uploadDriverDeliveryMedia } from "../../middlewares/upload.js";
 

@@ -2,6 +2,7 @@ import db from "../../config/db.js";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
 import { buildTruckVehicleSql, syncTruckBoxCount } from "../../utils/truck.js";
 import { insertProductTruckLog, insertProductWarehouseLog } from "../../services/product-log.js";
+import { emitDeliveryTruckScanUpdated } from "../../services/realtime/socket.js";
 
 const truckVehicleSql = buildTruckVehicleSql();
 
@@ -981,6 +982,7 @@ export const loadDeliveryTruckProduct = async (req, res) => {
     await syncTruckBoxCount(connection, truckLoadId);
     await connection.commit();
     transactionStarted = false;
+    emitDeliveryTruckScanUpdated(truckLoadId, actorId);
 
     res.status(201).json({ success: true, message: `ยิง SN ${product.serial_no} ขึ้นรถสำเร็จ` });
   } catch (error) {
@@ -1098,6 +1100,7 @@ export const unloadDeliveryTruckProduct = async (req, res) => {
     await syncTruckBoxCount(connection, truckLoadId);
     await connection.commit();
     transactionStarted = false;
+    emitDeliveryTruckScanUpdated(truckLoadId, actorId);
     res.json({ success: true, message: `นำ SN ${product.serial_no} กลับคลังสำเร็จ` });
   } catch (error) {
     if (connection && transactionStarted) await connection.rollback();

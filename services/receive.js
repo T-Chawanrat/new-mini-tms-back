@@ -284,13 +284,19 @@ export const insertCreateReceiveSerials = async (
   receiveId,
   sourceType = "WEB",
   now,
+  assignedWarehouseId,
 ) => {
   const cleanReceiveId = toNumberOrNull(receiveId);
+  const cleanAssignedWarehouseId = toNumberOrNull(assignedWarehouseId);
 
   if (!cleanReceiveId) {
     throw createReceiveError(
       "receive_id required for tm_receive_serials",
     );
+  }
+
+  if (!cleanAssignedWarehouseId) {
+    throw createReceiveError("assigned_warehouse_id required for tm_product_customers");
   }
 
   await conn.query(
@@ -462,6 +468,7 @@ export const insertCreateReceiveSerials = async (
         serial_no,
         customer_id,
         shipper_id,
+        assigned_warehouse_id,
         to_warehouse_id
       )
       SELECT
@@ -469,6 +476,7 @@ export const insertCreateReceiveSerials = async (
         receive_serial.serial_no,
         receive_serial.customer_id,
         receive_serial.shipper_id,
+        ?,
         receive_serial.to_warehouse_id
       FROM tm_receive_serials receive_serial
       WHERE receive_serial.receive_business_id = ?
@@ -476,7 +484,7 @@ export const insertCreateReceiveSerials = async (
         AND receive_serial.serial_id IS NOT NULL
         AND NULLIF(TRIM(receive_serial.serial_no), '') IS NOT NULL
     `,
-    [cleanReceiveId, sourceType],
+    [cleanAssignedWarehouseId, cleanReceiveId, sourceType],
   );
 };
 

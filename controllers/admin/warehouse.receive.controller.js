@@ -2,6 +2,7 @@ import db from "../../config/db.js";
 import { randomUUID } from "node:crypto";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
 import { formatDateOnly } from "../../utils/format-date.js";
+import { emitWarehouseReceiveUpdated } from "../../services/realtime/socket.js";
 
 const createWarehouseReceiveDraft = async (req, res) => {
   let connection;
@@ -146,7 +147,9 @@ export const getWarehouseReceiveSerials = async (req, res) => {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
 
     const where = [];
-    const params = [];
+    const params = [warehouseId];
+
+    where.push("product_customer.assigned_warehouse_id = ?");
 
     if (customerId !== null) {
       where.push("product_customer.customer_id = ?");
@@ -529,6 +532,7 @@ export const createWarehouseReceive = async (req, res) => {
     }
 
     await connection.commit();
+    emitWarehouseReceiveUpdated(warehouseId, createdBy);
 
     return res.status(201).json({
       success: true,

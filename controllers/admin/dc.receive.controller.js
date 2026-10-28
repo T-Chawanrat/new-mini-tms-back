@@ -1,6 +1,7 @@
 import db from "../../config/db.js";
 import { randomUUID } from "node:crypto";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
+import { emitDcReceiveUpdated } from "../../services/realtime/socket.js";
 
 const cleanSerialNos = (value) =>
   Array.isArray(value)
@@ -576,6 +577,7 @@ export const createDcReceive = async (req, res) => {
 
     await connection.commit();
     transactionStarted = false;
+    emitDcReceiveUpdated(warehouseId, actorId);
     return res.status(201).json({ success: true, message: "บันทึกรับสินค้าเข้า DC สำเร็จ", received: productRows.length });
   } catch (error) {
     if (connection && transactionStarted) await connection.rollback();

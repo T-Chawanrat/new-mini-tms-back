@@ -5,6 +5,7 @@ import { cleanText, toNumberOrNull } from "../../utils/input.js";
 import { getPagination } from "../../utils/pagination.js";
 import { buildTruckVehicleSql, cleanYN, syncTruckBoxCount } from "../../utils/truck.js";
 import { insertProductTruckLog, insertProductWarehouseLog } from "../../services/product-log.js";
+import { emitTruckloadScanUpdated } from "../../services/realtime/socket.js";
 
 const truckVehicleSql = buildTruckVehicleSql({
   vehicleAlias: "vehicle",
@@ -785,6 +786,7 @@ export const loadTruckProduct = async (req, res) => {
 
     await connection.commit();
     transactionStarted = false;
+    emitTruckloadScanUpdated(truckLoadId, actorId);
 
     return res.status(201).json({
       success: true,
@@ -1171,6 +1173,7 @@ export const unloadTruckProduct = async (req, res) => {
 
     await connection.commit();
     transactionStarted = false;
+    emitTruckloadScanUpdated(truckLoadId, actorId);
     return res.status(200).json({ success: true, message: `นำ SN ${serialNo} กลับรายการรอยิงแล้ว` });
   } catch (error) {
     if (connection && transactionStarted) await connection.rollback();

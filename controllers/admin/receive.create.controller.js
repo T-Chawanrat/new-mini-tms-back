@@ -42,6 +42,7 @@ export const createReceive = async (req, res) => {
     const recipientId = toNumberOrNull(receiveHeader.recipient_id);
 
     const recipientDetailId = toNumberOrNull(receiveHeader.recipient_detail_id);
+    const assignedWarehouseId = toNumberOrNull(receiveHeader.assigned_warehouse_id);
 
     if (!finalCustomerId) {
       return res.status(400).json({
@@ -64,6 +65,12 @@ export const createReceive = async (req, res) => {
     if (!recipientDetailId) {
       return res.status(400).json({
         message: "กรุณาเลือกที่อยู่ผู้รับ",
+      });
+    }
+
+    if (!assignedWarehouseId) {
+      return res.status(400).json({
+        message: "กรุณาเลือกคลังดูแลงาน",
       });
     }
 
@@ -266,7 +273,7 @@ export const createReceive = async (req, res) => {
     | customer_type = BUSINESS
     |--------------------------------------------------------------------------
     */
-    await insertCreateReceiveSerials(conn, receiveId, "WEB", now);
+    await insertCreateReceiveSerials(conn, receiveId, "WEB", now, assignedWarehouseId);
 
     await insertCreateProductTransactions({
       conn,

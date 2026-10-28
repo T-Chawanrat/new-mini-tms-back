@@ -8,6 +8,49 @@ let io;
 
 export const deliveryIssueRoom = (issueId) => `delivery-issue:${issueId}`;
 const driverInboxRoom = (driverId) => `driver-delivery-issues:${driverId}`;
+const warehouseScanRoom = (type, warehouseId) => `${type}:warehouse:${warehouseId}`;
+const truckScanRoom = (type, truckLoadId) => `${type}:truck:${truckLoadId}`;
+
+const joinWarehouseScanRoom = (socket, event, type) => {
+  socket.on(event, (callback) => {
+    const warehouseId = Number(socket.data.user.warehouse_id);
+    if (!Number.isInteger(warehouseId) || warehouseId <= 0) {
+      callback?.({ success: false });
+      return;
+    }
+    socket.join(warehouseScanRoom(type, warehouseId));
+    callback?.({ success: true });
+  });
+};
+
+const joinTruckScanRoom = (socket, event, type, truckStatus) => {
+  socket.on(event, async (truckLoadId, callback) => {
+    try {
+      const id = Number(truckLoadId);
+      const warehouseId = Number(socket.data.user.warehouse_id);
+      const userId = Number(socket.data.user.id);
+      if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(userId) || userId <= 0) {
+        callback?.({ success: false });
+        return;
+      }
+      const [rows] = await db.query(
+        `SELECT 1 FROM tm_trucks
+         WHERE id = ? AND status = ? AND COALESCE(is_deleted, 'N') = 'N'
+           AND (warehouse_id = ? OR user_truck_id = ?)
+         LIMIT 1`,
+        [id, truckStatus, Number.isInteger(warehouseId) ? warehouseId : null, userId],
+      );
+      if (!rows.length) {
+        callback?.({ success: false });
+        return;
+      }
+      socket.join(truckScanRoom(type, id));
+      callback?.({ success: true });
+    } catch {
+      callback?.({ success: false });
+    }
+  });
+};
 
 export const initializeSocketServer = (httpServer) => {
   io = new Server(httpServer, {
@@ -31,6 +74,11 @@ export const initializeSocketServer = (httpServer) => {
   });
 
   io.on("connection", (socket) => {
+    joinWarehouseScanRoom(socket, "dc-receive:join", "dc-receive");
+    joinWarehouseScanRoom(socket, "warehouse-receive:join", "warehouse-receive");
+    joinTruckScanRoom(socket, "truckload-scan:join", "truckload-scan", "DC_TRUCK_DC");
+    joinTruckScanRoom(socket, "delivery-truck-scan:join", "delivery-truck-scan", "DC_TRUCK");
+
     socket.on("delivery-issues:inbox:join", (callback) => {
       if (Number(socket.data.user.role_id) === 7) {
         callback?.({ success: false });
@@ -114,3 +162,25 @@ export const emitDriverDeliveryIssueInbox = async (issueId, payload) => {
     console.error("emitDriverDeliveryIssueInbox error:", error);
   }
 };
+
+const emitWarehouseScanUpdate = (type, event, warehouseId, actorId) => {
+  if (!io || !Number.isInteger(Number(warehouseId))) return;
+  io.to(warehouseScanRoom(type, warehouseId)).emit(event, { actorId });
+};
+
+const emitTruckScanUpdate = (type, event, truckLoadId, actorId) => {
+  if (!io || !Number.isInteger(Number(truckLoadId))) return;
+  io.to(truckScanRoom(type, truckLoadId)).emit(event, { actorId });
+};
+
+export const emitDcReceiveUpdated = (warehouseId, actorId) =>
+  emitWarehouseScanUpdate("dc-receive", "dc-receive:updated", warehouseId, actorId);
+
+export const emitWarehouseReceiveUpdated = (warehouseId, actorId) =>
+  emitWarehouseScanUpdate("warehouse-receive", "warehouse-receive:updated", warehouseId, actorId);
+
+export const emitTruckloadScanUpdated = (truckLoadId, actorId) =>
+  emitTruckScanUpdate("truckload-scan", "truckload-scan:updated", truckLoadId, actorId);
+
+export const emitDeliveryTruckScanUpdated = (truckLoadId, actorId) =>
+  emitTruckScanUpdate("delivery-truck-scan", "delivery-truck-scan:updated", truckLoadId, actorId);

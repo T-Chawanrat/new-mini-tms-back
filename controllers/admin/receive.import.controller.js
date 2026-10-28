@@ -46,11 +46,19 @@ export const importReceivesFromExcel = async (req, res) => {
     }
 
     const customerId = toNumberOrNull(req.body.customer_id);
+    const assignedWarehouseId = toNumberOrNull(req.body.assigned_warehouse_id);
 
     if (!customerId) {
       return res.status(400).json({
         success: false,
         message: "กรุณาเลือก Customer ก่อนนำเข้า",
+      });
+    }
+
+    if (!assignedWarehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "กรุณาเลือกคลังดูแลงานก่อนนำเข้า",
       });
     }
 
@@ -194,7 +202,7 @@ export const importReceivesFromExcel = async (req, res) => {
         }
       }
 
-      await insertImportReceiveSerials(conn, receiveId, now);
+      await insertImportReceiveSerials(conn, receiveId, now, assignedWarehouseId);
 
       await insertImportProductTransactions({
         conn,

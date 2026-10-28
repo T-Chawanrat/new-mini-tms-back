@@ -524,8 +524,13 @@ export const getDeliveryTruckProducts = async (req, res) => {
         LEFT JOIN mm_customers customer
           ON customer.id = receive_serial.customer_id
         WHERE product_warehouse.now_warehouse_id = ?
-          AND product_warehouse.to_warehouse_id = ?
-          AND product_warehouse.route_id = ?
+          AND (
+            product_warehouse.route_id IS NULL
+            OR (
+              product_warehouse.to_warehouse_id = ?
+              AND product_warehouse.route_id = ?
+            )
+          )
           AND NULLIF(TRIM(product_warehouse.serial_no), '') IS NOT NULL
         ORDER BY product_warehouse.id ASC
       `,
@@ -870,7 +875,7 @@ export const loadDeliveryTruckProduct = async (req, res) => {
           AND product_active.serial_no = product_warehouse.serial_no
         WHERE product_warehouse.serial_no = ?
           AND product_warehouse.now_warehouse_id = ?
-          AND product_warehouse.to_warehouse_id = ?
+          AND (product_warehouse.to_warehouse_id = ? OR product_warehouse.route_id IS NULL)
         LIMIT 1
         FOR UPDATE
       `,
@@ -958,9 +963,9 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       license_plate_province_id: vehicle.license_plate_province_id || null,
       status: "LOADED",
       truck_load_id: truckLoadId,
-      is_dc_mismatch: "N",
+      is_dc_mismatch: String(product.to_warehouse_id ?? "") === String(truck.warehouse_id ?? "") ? "N" : "Y",
       parcel_to_warehouse_id: product.to_warehouse_id,
-      truck_to_warehouse_id: null,
+      truck_to_warehouse_id: truck.warehouse_id,
       is_route_mismatch: product.route_id == null || truck.route_id == null ? null : routeWarningCode === "ROUTE_MISMATCH" ? "Y" : "N",
       parcel_route_id: product.route_id,
       truck_route_id: truck.route_id,

@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import { auth } from "../../middlewares/auth.js";
 import { assignStoredImageNames } from "../../middlewares/upload.js";
-import { createDeliveryIssue, createDeliveryIssueMessage, getDeliveryIssueMessages, getDeliveryIssueThreads, updateDeliveryIssueStatus } from "../../controllers/admin/delivery.issue.controller.js";
+import { createDeliveryIssue, createDeliveryIssueMessage, getDeliveryIssueMessages, getDeliveryIssueThreads, updateDeliveryIssueStatus } from "../../controllers/admin/issue.controller.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 4, fileSize: 5 * 1024 * 1024 }, fileFilter: (req, file, callback) => callback(null, ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) });

@@ -5,7 +5,7 @@ import {
   createHoliday,
   updateHoliday,
   deleteHoliday,
-} from "../../controllers/admin/holiday.controller.js";
+} from "../../controllers/admin/manage.holiday.controller.js";
 
 const router = express.Router();
 

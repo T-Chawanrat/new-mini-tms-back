@@ -2,6 +2,7 @@ import express from "express";
 
 import {
   getLabelPrintLogs,
+  getDeliveryTruckLogs,
   getProductTruckLogs,
   getProductWarehouseLogs,
   getReceiveCreateLogs,
@@ -13,6 +14,7 @@ const router = express.Router();
 
 router.get("/label-print", auth, getLabelPrintLogs);
 router.get("/product-trucks", auth, getProductTruckLogs);
+router.get("/delivery-trucks", auth, getDeliveryTruckLogs);
 router.get("/product-warehouses", auth, getProductWarehouseLogs);
 router.get("/receive-create", auth, getReceiveCreateLogs);
 router.get("/receive-imports", auth, getReceiveImports);

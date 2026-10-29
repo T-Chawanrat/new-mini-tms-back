@@ -13,6 +13,7 @@ export const getLabelPrintLogs = async (req, res) => {
       LEFT JOIN mm_customers customer ON customer.id = label_log.customer_id
       LEFT JOIN um_users printer ON printer.id = label_log.printed_by_user
       LEFT JOIN mm_warehouses_to warehouse ON warehouse.warehouse_id = label_log.to_warehouse_id
+      ORDER BY label_log.created_at DESC
     `);
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -21,37 +22,50 @@ export const getLabelPrintLogs = async (req, res) => {
   }
 };
 
-export const getProductTruckLogs = async (req, res) => {
+const getProductTruckLogsByStatus = async (res, truckStatus) => {
   try {
-    const [rows] = await db.query(`
+    const [rows] = await db.query(
+      `
       SELECT
         truck_log.*,
         creator.first_name,
         creator.last_name,
-        warehouse.warehouse_name AS parcel_to_warehouse_name,
+        parcel_warehouse.warehouse_name AS parcel_to_warehouse_name,
+        truck_warehouse.warehouse_name AS truck_to_warehouse_name,
         truck.truck_code,
         truck.status AS truck_status,
-        truck.route_id,
-        route.route_code,
-        route.route_name,
+        parcel_route.route_code AS parcel_route_code,
+        parcel_route.route_name AS parcel_route_name,
+        truck_route.route_code,
+        truck_route.route_name,
         province.province_name AS license_plate_province_name
       FROM logs_product_trucks truck_log
       LEFT JOIN um_users creator ON creator.id = truck_log.created_by
-      LEFT JOIN mm_warehouses_to warehouse ON warehouse.warehouse_id = truck_log.parcel_to_warehouse_id
+      LEFT JOIN mm_warehouses_to parcel_warehouse ON parcel_warehouse.warehouse_id = truck_log.parcel_to_warehouse_id
+      LEFT JOIN mm_warehouses_to truck_warehouse ON truck_warehouse.warehouse_id = truck_log.truck_to_warehouse_id
       LEFT JOIN tm_trucks truck ON truck.id = truck_log.truck_load_id
-      LEFT JOIN mm_routes route ON route.route_id = truck.route_id
+      LEFT JOIN mm_routes parcel_route ON parcel_route.route_id = truck_log.parcel_route_id
+      LEFT JOIN mm_routes truck_route ON truck_route.route_id = truck_log.truck_route_id
       LEFT JOIN (
         SELECT province_id, MAX(province_name) AS province_name
         FROM mm_master_addresses
         GROUP BY province_id
       ) province ON province.province_id = truck_log.license_plate_province_id
-    `);
+      WHERE truck.status = ?
+      ORDER BY truck_log.created_date DESC
+      `,
+      [truckStatus],
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
-    console.error("getProductTruckLogs error:", error);
+    console.error("getProductTruckLogsByStatus error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดประวัติสินค้าในรถได้" });
   }
 };
+
+export const getProductTruckLogs = async (_req, res) => getProductTruckLogsByStatus(res, "DC_TRUCK_DC");
+
+export const getDeliveryTruckLogs = async (_req, res) => getProductTruckLogsByStatus(res, "DC_TRUCK");
 
 export const getProductWarehouseLogs = async (req, res) => {
   try {
@@ -66,6 +80,7 @@ export const getProductWarehouseLogs = async (req, res) => {
       LEFT JOIN mm_warehouses_to warehouse_now ON warehouse_now.warehouse_id = warehouse_log.now_warehouse_id
       LEFT JOIN mm_warehouses_to warehouse_to ON warehouse_to.warehouse_id = warehouse_log.to_warehouse_id
       LEFT JOIN um_users creator ON creator.id = warehouse_log.created_by
+      ORDER BY warehouse_log.created_date DESC
     `);
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -87,6 +102,7 @@ export const getReceiveCreateLogs = async (req, res) => {
       LEFT JOIN mm_customers customer ON customer.id = receive_log.customer_id
       LEFT JOIN um_users creator ON creator.id = receive_log.created_by
       LEFT JOIN mm_warehouses_to warehouse ON warehouse.warehouse_id = receive_log.warehouse_id
+      ORDER BY receive_log.created_at DESC
     `);
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -109,6 +125,7 @@ export const getReceiveImports = async (req, res) => {
       LEFT JOIN um_users creator ON creator.id = receive_import.created_by
       LEFT JOIN mm_customers customer ON customer.id = receive_import.customer_id
       LEFT JOIN um_users updater ON updater.id = receive_import.updated_by
+      ORDER BY receive_import.created_date DESC
     `);
     return res.json({ success: true, data: rows });
   } catch (error) {

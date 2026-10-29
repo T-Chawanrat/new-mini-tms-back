@@ -4,7 +4,7 @@ import {
   getDeliveryReportByDt,
   getDeliveryReportByReceive,
   getDeliveryReportBySn,
-} from "../../controllers/admin/delivery.pending.report.controller.js";
+} from "../../controllers/admin/pending.report.controller.js";
 import { auth } from "../../middlewares/auth.js";
 
 const router = express.Router();

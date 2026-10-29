@@ -13,7 +13,7 @@ import {
   getDeliveryTrucks,
   loadDeliveryTruckProduct,
   unloadDeliveryTruckProduct,
-} from "../../controllers/admin/delivery.truck.controller.js";
+} from "../../controllers/admin/truck.delivery.controller.js";
 import { auth } from "../../middlewares/auth.js";
 
 const router = express.Router();

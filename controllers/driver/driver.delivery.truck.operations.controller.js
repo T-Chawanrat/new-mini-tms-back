@@ -254,11 +254,10 @@ export const loadDeliveryTruckProduct = async (req, res) => {
           AND product_active.serial_no = product_warehouse.serial_no
         WHERE product_warehouse.serial_no = ?
           AND product_warehouse.now_warehouse_id = ?
-          AND product_warehouse.to_warehouse_id = ?
         LIMIT 1
         FOR UPDATE
       `,
-      [serialNo, truck.warehouse_id, truck.warehouse_id],
+      [serialNo, truck.warehouse_id],
     );
     const product = productRows[0];
 
@@ -273,15 +272,20 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       : String(product.route_id) !== String(truck.route_id)
         ? "ROUTE_MISMATCH"
         : null;
+    const isDcMismatch = String(product.to_warehouse_id ?? "") !== String(truck.warehouse_id ?? "");
+    const warningCodes = [
+      ...(isDcMismatch ? ["WAREHOUSE_MISMATCH"] : []),
+      ...(routeWarningCode ? [routeWarningCode] : []),
+    ];
 
-    if (routeWarningCode && !confirmRouteWarning) {
+    if (warningCodes.length && !confirmRouteWarning) {
       await connection.rollback();
       transactionStarted = false;
       return res.status(409).json({
         success: false,
-        code: routeWarningCode,
-        message: routeWarningCode === "ROUTE_MISSING" ? "สินค้านี้ยังไม่ได้กำหนดสายรถ" : "สินค้านี้อยู่คนละสายรถกับใบรถกระจาย",
-        data: { serial_no: product.serial_no, route_id: product.route_id },
+        code: "SCAN_WARNING",
+        message: "พบเงื่อนไขที่ต้องยืนยันก่อนยิงขึ้นรถ",
+        data: { serial_no: product.serial_no, warning_codes: warningCodes },
       });
     }
 
@@ -342,9 +346,9 @@ export const loadDeliveryTruckProduct = async (req, res) => {
       license_plate_province_id: vehicle.license_plate_province_id || null,
       status: "LOADED",
       truck_load_id: truckLoadId,
-      is_dc_mismatch: "N",
+      is_dc_mismatch: isDcMismatch ? "Y" : "N",
       parcel_to_warehouse_id: product.to_warehouse_id,
-      truck_to_warehouse_id: null,
+      truck_to_warehouse_id: truck.warehouse_id,
       is_route_mismatch: product.route_id == null || truck.route_id == null ? null : routeWarningCode === "ROUTE_MISMATCH" ? "Y" : "N",
       parcel_route_id: product.route_id,
       truck_route_id: truck.route_id,

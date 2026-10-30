@@ -97,6 +97,7 @@ export const driverLogin = async (req, res) => {
         first_name: user.first_name,
         last_name: user.last_name,
         role_id: user.role_id,
+        employment_type: user.employment_type,
         warehouse_id: user.warehouse_id,
         warehouse_name: user.warehouse_name,
         customer_id: user.customer_id,

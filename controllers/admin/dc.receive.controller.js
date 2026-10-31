@@ -556,7 +556,17 @@ export const createDcReceive = async (req, res) => {
               SELECT 1
               FROM tm_product_trucks remaining_product
               WHERE remaining_product.truck_load_id = truck.id
-                AND remaining_product.status IN ('LOADED', 'IN_TRANSIT')
+            )
+            AND EXISTS (
+              SELECT 1
+              FROM tm_truck_details detail
+              WHERE detail.truck_load_id = truck.id
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM tm_truck_details detail
+              WHERE detail.truck_load_id = truck.id
+                AND COALESCE(detail.is_receive, 'N') <> 'Y'
             )
         `,
         [actorId, now, ...truckLoadIds, warehouseId],

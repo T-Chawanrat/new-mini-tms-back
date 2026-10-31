@@ -43,6 +43,13 @@ for (const product of products) {
           now,
         ],
       );
+      await connection.query(
+        `UPDATE tm_truck_details
+         SET is_receive = 'Y', receive_by = ?, receive_date = ?
+         WHERE truck_load_id = ? AND serial_id = ? AND serial_no = ?`,
+        [driverId, now, product.truck_load_id, ...pair],
+      );
+      await connection.query(`DELETE FROM tm_product_trucks WHERE id = ? AND serial_id = ? AND serial_no = ?`, [product.product_truck_id, ...pair]);
       await connection.query(`DELETE FROM tm_product_actived WHERE serial_id = ? AND serial_no = ?`, pair);
     }
     };

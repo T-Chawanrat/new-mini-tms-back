@@ -26,6 +26,7 @@ import driverDeliveryTruckRoutes from "./routes/driver/driver.delivery.truck.rou
 import driverDeliveriesRoutes from "./routes/driver/driver.deliveries.route.js";
 import driverMileageRoutes from "./routes/driver/driver.mileage.route.js";
 import driverDeliveryIssueRoutes from "./routes/driver/driver.delivery.issue.route.js";
+import driverReturnRoutes from "./routes/driver/driver.return.route.js";
 import dcReceiveRoutes from "./routes/admin/dc.receive.routes.js";
 import moveTkRoutes from "./routes/admin/move.tk.routes.js";
 import moveDtRoutes from "./routes/admin/move.dt.routes.js";
@@ -80,6 +81,7 @@ app.use("/driver/delivery-trucks", driverDeliveryTruckRoutes);
 app.use("/driver/deliveries", driverDeliveriesRoutes);
 app.use("/driver/mileage", driverMileageRoutes);
 app.use("/driver/delivery-issues", driverDeliveryIssueRoutes);
+app.use("/driver/returns", driverReturnRoutes);
 app.use("/delivery-trucks", truckDeliveryRoutes);
 app.use("/delivery-closes", deliveryCloseRoutes);
 app.use("/delivery-close-media", deliveryCloseMediaRoutes);

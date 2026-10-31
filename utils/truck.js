@@ -32,6 +32,30 @@ export const syncTruckBoxCount = async (connection, truckLoadId) => {
   return countBox;
 };
 
+export const completeTruckIfAllReceived = (connection, truckLoadId) =>
+  connection.query(
+    `UPDATE tm_trucks truck
+     SET truck.is_completed = 'Y'
+     WHERE truck.id = ?
+       AND NOT EXISTS (
+         SELECT 1
+         FROM tm_product_trucks product
+         WHERE product.truck_load_id = truck.id
+       )
+       AND EXISTS (
+         SELECT 1
+         FROM tm_truck_details detail
+         WHERE detail.truck_load_id = truck.id
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM tm_truck_details detail
+         WHERE detail.truck_load_id = truck.id
+           AND COALESCE(detail.is_receive, 'N') <> 'Y'
+       )`,
+    [truckLoadId],
+  );
+
 export const buildTruckVehicleSql = ({
   vehicleAlias = "vehicle",
   contractorVehicleAlias = "contractor_vehicle",

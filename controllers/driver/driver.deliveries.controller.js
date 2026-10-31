@@ -1,10 +1,11 @@
 import db from "../../config/db.js";
 import { toNumberOrNull } from "../../utils/input.js";
 import fs from "fs/promises";
-import { buildTruckVehicleSql } from "../../utils/truck.js";
-import { parseCoordinate } from "../../utils/location.js";
+import { buildTruckVehicleSql, completeTruckIfAllReceived } from "../../utils/truck.js";
+import { parseOptionalLocation } from "../../utils/location.js";
 import { saveDriverDeliveryMedia } from "../../services/driver/delivery-media.js";
 import { saveDriverDeliveryTransactions } from "../../services/driver/delivery-transaction.js";
+import { deactivateContractorIfNoPendingTrucks } from "../../services/driver/driver-contractor.js";
 
 const billKeyOf = (row) => {
   const businessId = toNumberOrNull(row.receive_business_id);
@@ -102,24 +103,52 @@ const buildDriverDeliveries = async (rows) => {
 export const getDriverDeliverySummary = async (req, res) => {
   try {
     const driverId = toNumberOrNull(req.user?.id);
-    const warehouseId = toNumberOrNull(req.user?.warehouse_id);
-    if (!driverId || !warehouseId) {
+    if (!driverId) {
       return res.status(400).json({ success: false, message: "ข้อมูลผู้ขับรถไม่ถูกต้อง" });
     }
-    const [[result]] = await db.query(
-      `SELECT COUNT(DISTINCT truck.id) AS truckCount
+    const [[preparing]] = await db.query(
+      `SELECT COUNT(*) AS truckCount
        FROM tm_trucks truck
-       INNER JOIN tm_product_trucks product ON product.truck_load_id = truck.id
-       INNER JOIN tm_product_actived active ON active.serial_id = product.serial_id AND active.serial_no = product.serial_no
-       INNER JOIN tm_receive_serials rs ON rs.serial_id = product.serial_id AND rs.serial_no = product.serial_no
-       WHERE truck.user_truck_id = ? AND truck.warehouse_id = ?
-         AND truck.status = 'DC_TRUCK' AND truck.is_close = 'Y' AND truck.is_go = 'Y'
-         AND COALESCE(truck.is_deleted, 'N') = 'N' AND product.status = 'IN_TRANSIT'
-         AND (rs.item_is_deleted IS NULL OR rs.item_is_deleted = '' OR rs.item_is_deleted = '0'
-              OR LOWER(rs.item_is_deleted) IN ('false', 'n', 'no'))`,
-      [driverId, warehouseId],
+       WHERE truck.user_truck_id = ?
+         AND COALESCE(truck.is_deleted, 'N') = 'N'
+         AND COALESCE(truck.is_close, 'N') <> 'Y'`,
+      [driverId],
     );
-    return res.json({ success: true, data: { truckCount: Number(result.truckCount) } });
+    const [[delivering]] = await db.query(
+      `SELECT
+         COUNT(DISTINCT truck.id) AS truckCount,
+         COUNT(DISTINCT CONCAT(detail.serial_id, ':', detail.serial_no)) AS totalSerialCount,
+         COUNT(DISTINCT CASE WHEN delivery_close.delivery_status = 'COMPLETED'
+           THEN CONCAT(detail.serial_id, ':', detail.serial_no) END) AS deliveredSerialCount
+       FROM tm_trucks truck
+       INNER JOIN (
+         SELECT DISTINCT product.truck_load_id
+         FROM tm_product_trucks product
+         INNER JOIN tm_product_actived active ON active.serial_id = product.serial_id AND active.serial_no = product.serial_no
+         INNER JOIN tm_receive_serials receive_serial ON receive_serial.serial_id = product.serial_id AND receive_serial.serial_no = product.serial_no
+         WHERE product.status = 'IN_TRANSIT'
+           AND (receive_serial.item_is_deleted IS NULL OR receive_serial.item_is_deleted = '' OR receive_serial.item_is_deleted = '0'
+                OR LOWER(receive_serial.item_is_deleted) IN ('false', 'n', 'no'))
+       ) active_truck ON active_truck.truck_load_id = truck.id
+       INNER JOIN tm_truck_details detail ON detail.truck_load_id = truck.id
+       LEFT JOIN tm_delivery_close delivery_close
+         ON delivery_close.truck_load_id = detail.truck_load_id
+         AND delivery_close.serial_id = detail.serial_id
+         AND delivery_close.serial_no = detail.serial_no
+       WHERE truck.user_truck_id = ?
+         AND truck.status = 'DC_TRUCK' AND truck.is_close = 'Y' AND truck.is_go = 'Y'
+         AND COALESCE(truck.is_deleted, 'N') = 'N'`,
+      [driverId],
+    );
+    return res.json({
+      success: true,
+      data: {
+        preparingTruckCount: Number(preparing.truckCount),
+        truckCount: Number(delivering.truckCount),
+        totalSerialCount: Number(delivering.totalSerialCount),
+        deliveredSerialCount: Number(delivering.deliveredSerialCount),
+      },
+    });
   } catch (error) {
     console.error("getDriverDeliverySummary error:", error);
     return res.status(500).json({ success: false, message: "ไม่สามารถโหลดข้อมูลสรุปการนำจ่ายได้" });
@@ -210,12 +239,16 @@ export const completeDriverDeliveries = async (req, res) => {
     const pairs = serials.map((item) => [String(item.serial_id), item.serial_no]);
     if (new Set(pairs.map((pair) => JSON.stringify(pair))).size !== pairs.length)
       return res.status(400).json({ success: false, message: "พบ SN ซ้ำในรายการ" });
-    const lat = parseCoordinate(req.body.lat, -90, 90, false);
-    const lng = parseCoordinate(req.body.lng, -180, 180, false);
-    const accuracy = parseCoordinate(req.body.accuracy_m, 0, 999999.99, false);
-    if ([lat, lng, accuracy].includes(false) || ([lat, lng, accuracy].some((v) => v === null) && ![lat, lng, accuracy].every((v) => v === null))) {
+    const location = parseOptionalLocation({
+      latitude: req.body.lat,
+      longitude: req.body.lng,
+      accuracy: req.body.accuracy_m,
+      maxAccuracy: 999999.99,
+    });
+    if (location === false) {
       return res.status(400).json({ success: false, message: "ข้อมูลพิกัดไม่ถูกต้อง" });
     }
+    const { latitude: lat = null, longitude: lng = null, accuracy = null } = location || {};
     const proof = req.files?.proof_images || [];
     const signature = req.files?.sign_images || [];
     connection = await db.getConnection();
@@ -268,29 +301,9 @@ export const completeDriverDeliveries = async (req, res) => {
     await saveDriverDeliveryTransactions({ connection, products, now, lat, lng, accuracy, driverId, warehouseId });
     const truckIds = [...new Set(products.map((product) => product.truck_load_id))];
     for (const truckId of truckIds) {
-      await connection.query(
-        `UPDATE tm_trucks truck
-         SET truck.is_completed = 'Y'
-         WHERE truck.id = ?
-           AND NOT EXISTS (
-             SELECT 1
-             FROM tm_product_trucks product
-             WHERE product.truck_load_id = truck.id
-           )
-           AND EXISTS (
-             SELECT 1
-             FROM tm_truck_details detail
-             WHERE detail.truck_load_id = truck.id
-           )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM tm_truck_details detail
-             WHERE detail.truck_load_id = truck.id
-               AND COALESCE(detail.is_receive, 'N') <> 'Y'
-           )`,
-        [truckId],
-      );
+      await completeTruckIfAllReceived(connection, truckId);
     }
+    await deactivateContractorIfNoPendingTrucks(connection, driverId);
     await connection.commit();
     committed = true;
     return res.json({ success: true, message: "บันทึกการจัดส่งสำเร็จ" });

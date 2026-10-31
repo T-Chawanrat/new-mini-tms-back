@@ -1,3 +1,5 @@
+import { saveDriverProductTransactionFromLast } from "./driver.product-transaction.js";
+
 export const saveDriverDeliveryTransactions = async ({ connection, products, now, lat, lng, accuracy, driverId, warehouseId }) => {
 for (const product of products) {
       const pair = [product.serial_id, product.serial_no];
@@ -5,14 +7,19 @@ for (const product of products) {
         `INSERT INTO tm_delivery_close (truck_load_id, serial_id, serial_no, delivery_status, delivered_datetime, source, lat, lng, accuracy_m, created_by, created_date, updated_by, updated_date) VALUES (?, ?, ?, 'COMPLETED', ?, 'DRIVER_APP', ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE truck_load_id = VALUES(truck_load_id), serial_no = VALUES(serial_no), delivery_status = 'COMPLETED', delivered_datetime = VALUES(delivered_datetime), source = 'DRIVER_APP', lat = VALUES(lat), lng = VALUES(lng), accuracy_m = VALUES(accuracy_m), updated_by = VALUES(updated_by), updated_date = VALUES(updated_date)`,
         [product.truck_load_id, ...pair, now, lat, lng, accuracy, driverId, now, driverId, now],
       );
-      await connection.query(
-        `INSERT INTO tm_product_transactions (receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no, status_message, status_id, datetime, update_date, type, warehouse_id, created_by, latitude, longitude, warehouse_name, address, province_name, district_name, subdistrict_name, zip_code, created_name, username, user_id, data_year, data_yearmonth) SELECT receive_business_id, receive_walkin_id, receive_code, serial_id, serial_no, 'จัดส่งสำเร็จ', 18, ?, ?, NULL, ?, ?, ?, ?, warehouse_name, address, province_name, district_name, subdistrict_name, zip_code, created_name, username, user_id, ?, ? FROM tm_product_transactions_last WHERE serial_id = ? AND serial_no = ?`,
-        [now, now, warehouseId, driverId, lat, lng, now.getFullYear(), now.getFullYear() * 100 + now.getMonth() + 1, ...pair],
-      );
-      await connection.query(
-        `UPDATE tm_product_transactions_last SET status_message = 'จัดส่งสำเร็จ', status_id = 18, datetime = ?, update_date = ?, type = NULL, warehouse_id = ?, created_by = ?, latitude = ?, longitude = ? WHERE serial_id = ? AND serial_no = ?`,
-        [now, now, warehouseId, driverId, lat, lng, ...pair],
-      );
+      await saveDriverProductTransactionFromLast({
+        connection,
+        serialId: product.serial_id,
+        serialNo: product.serial_no,
+        statusMessage: "จัดส่งสำเร็จ",
+        statusId: 18,
+        warehouseId,
+        driverId,
+        now,
+        latitude: lat,
+        longitude: lng,
+        updateLocation: true,
+      });
       await connection.query(
         `UPDATE tm_product_trucks SET status = 'DELIVERED' WHERE id = ? AND serial_id = ? AND serial_no = ? AND status = 'IN_TRANSIT'`,
         [product.product_truck_id, ...pair],

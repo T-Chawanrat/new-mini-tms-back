@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import db from "../../config/db.js";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
-import { parseCoordinate } from "../../utils/location.js";
+import { parseOptionalLocation } from "../../utils/location.js";
 import { saveMileageImages } from "../../services/driver/mileage-media.js";
 
 const inputError = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -15,12 +15,16 @@ const readInput = (req, maxPhotos) => {
   if (req.body.mileage != null && req.body.mileage !== "" && (mileage === null || mileage < 0 || mileage >= 10000000000)) {
     throw inputError("เลขไมล์ไม่ถูกต้อง");
   }
-  const latitude = parseCoordinate(req.body.latitude, -90, 90, false);
-  const longitude = parseCoordinate(req.body.longitude, -180, 180, false);
-  const accuracy = parseCoordinate(req.body.accuracy_m, 0, 99999999.99, false);
-  if ([latitude, longitude, accuracy].includes(false) || (latitude === null) !== (longitude === null) || (latitude === null && accuracy !== null)) {
+  const location = parseOptionalLocation({
+    latitude: req.body.latitude,
+    longitude: req.body.longitude,
+    accuracy: req.body.accuracy_m,
+    maxAccuracy: 99999999.99,
+  });
+  if (location === false) {
     throw inputError("ข้อมูลพิกัดไม่ถูกต้อง");
   }
+  const { latitude = null, longitude = null, accuracy = null } = location || {};
   return { files, mileage, latitude, longitude, accuracy };
 };
 

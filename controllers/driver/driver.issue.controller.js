@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 
 import db from "../../config/db.js";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
+import { buildTruckVehicleSql } from "../../utils/truck.js";
 import { emitDeliveryIssue, emitDeliveryIssueInbox, emitDriverDeliveryIssueInbox } from "../../services/realtime/socket.js";
 
 const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../uploads");
@@ -11,6 +12,57 @@ const inputError = (message, status = 400) => Object.assign(new Error(message), 
 const uploadedImages = (req) => {
   if (Array.isArray(req.files)) return req.files;
   return Array.isArray(req.files?.images) ? req.files.images : [];
+};
+
+const parseSerialPairs = (value) => {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw inputError("รายการ SN ไม่ถูกต้อง");
+  const pairs = new Map();
+  for (const item of value) {
+    const serialId = cleanText(item?.serial_id)?.slice(0, 100);
+    const serialNo = cleanText(item?.serial_no)?.slice(0, 100);
+    if (!serialId || !serialNo) throw inputError("รายการ SN ไม่ถูกต้อง");
+    pairs.set(JSON.stringify([serialId, serialNo]), { serialId, serialNo });
+  }
+  return [...pairs.values()];
+};
+
+const logDeliveryFailures = async (connection, { driverId, bill, serialPairs, now }) => {
+  if (!serialPairs.length) return;
+  const placeholders = serialPairs.map(() => "(?, ?)").join(", ");
+  const vehicleSql = buildTruckVehicleSql();
+  const [result] = await connection.query(
+    `INSERT INTO logs_product_trucks (
+       product_truck_id, serial_id, serial_no, event_type, created_by,
+       user_truck_id, driver_name, truck_id, truck_license_plate,
+       license_plate_province_id, status, truck_load_id, is_dc_mismatch,
+       parcel_to_warehouse_id, truck_to_warehouse_id,
+       is_route_mismatch, parcel_route_id, truck_route_id, created_date
+     )
+     SELECT product.id, product.serial_id, product.serial_no, 'DELIVERY_FAILED', ?,
+            product.user_truck_id, COALESCE(product.driver_name, truck.driver_name), product.truck_id,
+            ${vehicleSql.licensePlate}, ${vehicleSql.licensePlateProvinceId},
+            'IN_TRANSIT', product.truck_load_id, 'N', receive_serial.to_warehouse_id, truck.to_warehouse_id,
+            CASE
+              WHEN product.route_id IS NULL OR truck.route_id IS NULL THEN NULL
+              WHEN product.route_id <> truck.route_id THEN 'Y'
+              ELSE 'N'
+            END,
+            product.route_id, truck.route_id, ?
+     FROM tm_product_trucks product
+     INNER JOIN tm_trucks truck ON truck.id = product.truck_load_id
+     INNER JOIN tm_product_actived active ON active.serial_id = product.serial_id AND active.serial_no = product.serial_no
+     INNER JOIN tm_receive_serials receive_serial ON receive_serial.serial_id = product.serial_id AND receive_serial.serial_no = product.serial_no
+     LEFT JOIN mm_vehicles vehicle ON vehicle.id = product.truck_id
+     LEFT JOIN mm_vehicles_contractor contractor_vehicle ON contractor_vehicle.id = truck.vehicle_contractor_id
+     WHERE (product.serial_id, product.serial_no) IN (${placeholders})
+       AND product.status = 'IN_TRANSIT'
+       AND truck.user_truck_id = ? AND truck.status = 'DC_TRUCK' AND truck.is_close = 'Y' AND truck.is_go = 'Y'
+       AND COALESCE(truck.is_deleted, 'N') = 'N'
+       AND receive_serial.receive_business_id <=> ? AND receive_serial.receive_walkin_id <=> ?`,
+    [driverId, now, ...serialPairs.flatMap((pair) => [pair.serialId, pair.serialNo]), driverId, bill.receive_business_id, bill.receive_walkin_id],
+  );
+  if (result.affectedRows !== serialPairs.length) throw inputError("พบ SN ที่ไม่ได้อยู่ในงานนำจ่ายของบิลนี้", 409);
 };
 
 const requireDriverBill = async (connection, { driverId, receiveBusinessId = null, receiveWalkinId = null }) => {
@@ -151,6 +203,7 @@ export const createDriverDeliveryIssue = async (req, res) => {
     const receiveBusinessId = toNumberOrNull(req.body?.receive_business_id);
     const receiveWalkinId = toNumberOrNull(req.body?.receive_walkin_id);
     const reasonSendProblemId = toNumberOrNull(req.body?.reason_send_problem_id);
+    const serialPairs = parseSerialPairs(req.body?.serials);
     let issueType = cleanText(req.body?.issue_type)?.slice(0, 100) || "แจ้งปัญหาการจัดส่ง";
     const initialMessage = cleanText(req.body?.message_text)?.slice(0, 10000) || null;
     if (!driverId || (receiveBusinessId === null) === (receiveWalkinId === null)) throw inputError("ข้อมูลบิลไม่ถูกต้อง");
@@ -167,11 +220,12 @@ export const createDriverDeliveryIssue = async (req, res) => {
       issueType = String(reason.reason_send_problem_detail).trim().slice(0, 100);
     }
     const bill = await requireDriverBill(connection, { driverId, receiveBusinessId, receiveWalkinId });
+    const now = new Date();
+    await logDeliveryFailures(connection, { driverId, bill, serialPairs, now });
     const [[existing]] = await connection.query("SELECT delivery_issue_id FROM tm_delivery_issues WHERE receive_business_id <=> ? AND receive_walkin_id <=> ? LIMIT 1 FOR UPDATE", [bill.receive_business_id, bill.receive_walkin_id]);
     if (existing) {
       let messageId = null;
       if (initialMessage) {
-        const now = new Date();
         const [messageResult] = await connection.query(
           "INSERT INTO tm_delivery_messages (delivery_issue_id, sender_user_id, message_text, created_date) VALUES (?, ?, ?, ?)",
           [existing.delivery_issue_id, driverId, initialMessage, now],
@@ -185,7 +239,6 @@ export const createDriverDeliveryIssue = async (req, res) => {
       if (messageId) void emitDriverDeliveryIssueInbox(existing.delivery_issue_id, { issueId: existing.delivery_issue_id });
       return res.json({ success: true, data: { delivery_issue_id: existing.delivery_issue_id, delivery_status_message_id: messageId, created: false } });
     }
-    const now = new Date();
     const [result] = await connection.query(
       `INSERT INTO tm_delivery_issues (receive_business_id, receive_walkin_id, receive_code, issue_type, reason_send_problem_id, issue_status, created_by, created_date, updated_by, updated_date)
        VALUES (?, ?, ?, ?, ?, 'NEW', ?, ?, ?, ?)`,

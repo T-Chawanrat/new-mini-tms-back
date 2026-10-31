@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import db from "../../config/db.js";
 import { toNumberOrNull } from "../../utils/input.js";
 import { buildTruckVehicleSql } from "../../utils/truck.js";
-import { parseCoordinate } from "../../utils/location.js";
+import { parseLocation } from "../../utils/location.js";
 import {
   createDriverDeliveryTruck as createTruck,
   getDeliveryTruckProducts as getTruckProducts,
@@ -248,9 +248,11 @@ export const closeAndGoDriverDeliveryTruck = async (req, res) => {
     const actorId = getActorId(req);
     const warehouseId = getWarehouseId(req);
     const photo = req.file;
-    const latitude = parseCoordinate(req.body.latitude, -90, 90);
-    const longitude = parseCoordinate(req.body.longitude, -180, 180);
-    const accuracyM = parseCoordinate(req.body.accuracy_m, 0, Infinity);
+    const { latitude, longitude, accuracy: accuracyM } = parseLocation({
+      latitude: req.body.latitude,
+      longitude: req.body.longitude,
+      accuracy: req.body.accuracy_m,
+    });
 
     if (!truckLoadId || !actorId || !warehouseId) {
       return res.status(400).json({ success: false, message: "ข้อมูลใบรถกระจายไม่ถูกต้อง" });

@@ -7,6 +7,7 @@ import manageShipperRoutes from "./manage.shipper.route.js";
 import manageRecipientRoutes from "./manage.recipient.route.js";
 import managePackageRoutes from "./manage.package.route.js";
 import manageRoute from "./manage.route.route.js";
+import managePermissionRoutes from "./manage.permission.route.js";
 
 const router = express.Router();
 
@@ -17,6 +18,7 @@ router.use("/shippers", manageShipperRoutes);
 router.use("/recipients", manageRecipientRoutes);
 router.use("/packages", managePackageRoutes);
 router.use("/routes", manageRoute);
+router.use("/permissions", managePermissionRoutes);
 
 
 

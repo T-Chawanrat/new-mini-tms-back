@@ -4,7 +4,6 @@ import express from "express";
 import multer from "multer";
 import { importReceivesFromExcel, validateReceiveImportRows } from "../../controllers/admin/receive.import.controller.js";
 import { auth } from "../../middlewares/auth.js";
-import { allow } from "../../middlewares/allow.js";
 
 const router = express.Router();
 
@@ -15,7 +14,7 @@ const upload = multer({
   },
 });
 
-router.post("/receives/import", auth, allow(1, 2, 3, 4, 5, 10), upload.single("file"), importReceivesFromExcel);
-router.post("/receives/import/validate", auth, allow(1, 2, 3, 4, 5, 10), validateReceiveImportRows);
+router.post("/receives/import", auth, upload.single("file"), importReceivesFromExcel);
+router.post("/receives/import/validate", auth, validateReceiveImportRows);
 
 export default router;

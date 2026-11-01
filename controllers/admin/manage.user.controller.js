@@ -2,6 +2,7 @@ import db from "../../config/db.js";
 import { formatDateOnly } from "../../utils/format-date.js";
 import { buildLike } from "../../utils/sql.js";
 import { genderFromTitle, isValidTel } from "../../utils/input.js";
+import { hashPassword, verifyPassword } from "../../utils/password.js";
 
 // GET ALL USERS
 export const getUsers = async (req, res) => {
@@ -11,8 +12,6 @@ export const getUsers = async (req, res) => {
     }
 
     const { role_id, is_active, search } = req.query;
-
-    const currentRole = Number(req.user.role_id);
 
     let sql = `
       SELECT 
@@ -45,25 +44,8 @@ export const getUsers = async (req, res) => {
 
     const params = [];
 
-    let allowedRoles = null;
-
-    if (currentRole === 9) {
-      allowedRoles = [3, 4, 5, 6, 7, 8, 9];
-    } else if (currentRole === 10) {
-      allowedRoles = [2, 3, 4, 5, 6, 7, 8, 9, 10];
-    }
-
-    if (allowedRoles) {
-      sql += ` AND u.role_id IN (${allowedRoles.map(() => "?").join(",")})`;
-      params.push(...allowedRoles);
-    }
-
     if (role_id !== undefined && role_id !== "") {
       const roleNum = Number(role_id);
-
-      if (allowedRoles && !allowedRoles.includes(roleNum)) {
-        return res.json([]);
-      }
 
       sql += ` AND u.role_id = ?`;
       params.push(roleNum);
@@ -148,6 +130,7 @@ export const createUser = async (req, res) => {
       });
     }
 
+    const hashedPassword = await hashPassword(defaultPassword);
     connection = await db.getConnection();
     await connection.beginTransaction();
     const now = new Date();
@@ -245,7 +228,7 @@ export const createUser = async (req, res) => {
       [
         employee_code || null,
         username,
-        defaultPassword,
+        hashedPassword,
         title_name || null,
         first_name || null,
         last_name || null,
@@ -474,13 +457,13 @@ export const changeMyPassword = async (req, res) => {
 
     const user = rows[0];
 
-    // ตอนนี้ยัง plain password ตามช่วง dev
-    if (String(user.password) !== String(old_password)) {
+    if (!(await verifyPassword(old_password, user.password))) {
       return res.status(400).json({
         message: "รหัสผ่านเดิมไม่ถูกต้อง",
       });
     }
 
+    const hashedPassword = await hashPassword(new_password);
     await db.query(
       `
       UPDATE um_users
@@ -489,7 +472,7 @@ export const changeMyPassword = async (req, res) => {
         updated_at = ?
       WHERE id = ?
       `,
-      [new_password, now, userId],
+      [hashedPassword, now, userId],
     );
 
     res.json({

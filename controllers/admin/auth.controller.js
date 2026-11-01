@@ -1,5 +1,6 @@
 import db from "../../config/db.js";
 import jwt from "jsonwebtoken";
+import { verifyPassword } from "../../utils/password.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const MANAGER_ROLE_ID = 3;
@@ -95,7 +96,7 @@ export const login = async (req, res) => {
 
     const user = rows[0];
 
-    if (password !== user.password) {
+    if (!(await verifyPassword(password, user.password))) {
       return res.status(401).json({ message: "รหัสผ่านไม่ถูกต้อง" });
     }
 

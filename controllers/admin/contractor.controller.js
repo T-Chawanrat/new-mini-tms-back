@@ -1,5 +1,6 @@
 import db from "../../config/db.js";
 import { genderFromTitle } from "../../utils/input.js";
+import { hashPassword } from "../../utils/password.js";
 
 const truckPlateTypeIds = new Set(["3", "4"]);
 
@@ -135,6 +136,7 @@ export const createContractor = async (req, res) => {
       return res.status(401).json({ message: "ข้อมูลผู้ใช้งานหรือคลังไม่ถูกต้อง" });
     }
 
+    const hashedPassword = await hashPassword(tel);
     connection = await db.getConnection();
     await connection.beginTransaction();
     const now = new Date();
@@ -221,7 +223,7 @@ export const createContractor = async (req, res) => {
       [
         employeeCode,
         username,
-        tel,
+        hashedPassword,
         titleName,
         firstName,
         lastName,

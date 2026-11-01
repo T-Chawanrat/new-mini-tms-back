@@ -2,6 +2,7 @@ import db from "../../config/db.js";
 
 import { buildLike } from "../../utils/sql.js";
 import { isValidTel } from "../../utils/input.js";
+import { hashPassword } from "../../utils/password.js";
 
 /* ================= CUSTOMER ================= */
 
@@ -218,6 +219,7 @@ export const createCustomerUser = async (req, res) => {
     }
 
     const defaultPassword = "123456";
+    const hashedPassword = await hashPassword(defaultPassword);
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -248,7 +250,7 @@ export const createCustomerUser = async (req, res) => {
       `,
       [
         username,
-        defaultPassword,
+        hashedPassword,
         first_name || null,
         last_name || null,
         CUSTOMER_ROLE,

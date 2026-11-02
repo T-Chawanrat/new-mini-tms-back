@@ -222,8 +222,9 @@ export const getDeliveryTruckOptions = async (req, res) => {
         WHERE role_id = 7
           AND COALESCE(employment_type, 'EMPLOYEE') = 'EMPLOYEE'
           AND COALESCE(is_active, 1) = 1
+          AND EXISTS (SELECT 1 FROM um_user_warehouses uw WHERE uw.user_id = um_users.id AND uw.warehouse_id = ? AND uw.is_active = 1)
         ORDER BY employee_code ASC
-      `),
+      `, [warehouseId]),
       db.query(`
         SELECT id, license_plate, license_plate_province, model
         FROM mm_vehicles
@@ -251,8 +252,9 @@ export const getDeliveryTruckOptions = async (req, res) => {
           AND COALESCE(driver.is_active, 1) = 1
           AND driver.role_id = 7
           AND COALESCE(driver.employment_type, 'EMPLOYEE') = 'CONTRACTOR'
+          AND EXISTS (SELECT 1 FROM um_user_warehouses uw WHERE uw.user_id = driver.id AND uw.warehouse_id = ? AND uw.is_active = 1)
         ORDER BY driver.first_name, driver.last_name, vehicle.license_plate
-      `),
+      `, [warehouseId]),
       db.query(
         `
           SELECT route_id, warehouse_id, route_code, route_name
@@ -1277,9 +1279,10 @@ export const createDeliveryTruck = async (req, res) => {
           AND role_id = 7
           AND COALESCE(employment_type, 'EMPLOYEE') = ?
           AND COALESCE(is_active, 1) = 1
+          AND EXISTS (SELECT 1 FROM um_user_warehouses uw WHERE uw.user_id = um_users.id AND uw.warehouse_id = ? AND uw.is_active = 1)
         LIMIT 1
       `,
-      [userTruckId, driverType],
+      [userTruckId, driverType, warehouseId],
     );
 
     const [vehicleRows] = await connection.query(

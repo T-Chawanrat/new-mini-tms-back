@@ -7,7 +7,7 @@ export const getRoles = async (req, res) => {
     const [rows] = await db.query(`
       SELECT id, name
       FROM mm_roles
-      ORDER BY id ASC
+      ORDER BY name ASC
     `);
 
     res.json(rows);

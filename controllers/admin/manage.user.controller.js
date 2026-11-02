@@ -2,7 +2,7 @@ import db from "../../config/db.js";
 import { formatDateOnly } from "../../utils/format-date.js";
 import { buildLike } from "../../utils/sql.js";
 import { genderFromTitle, isValidTel } from "../../utils/input.js";
-import { hashPassword, verifyPassword } from "../../utils/password.js";
+import { hashPassword } from "../../utils/password.js";
 
 // GET ALL USERS
 export const getUsers = async (req, res) => {
@@ -191,15 +191,7 @@ export const createUser = async (req, res) => {
       });
     }
 
-    let finalWarehouse = null;
-
-    if ([3, 4, 9, 10].includes(role)) {
-      finalWarehouse = null;
-    } else if (role === 6) {
-      finalWarehouse = 15;
-    } else {
-      finalWarehouse = warehouse_id || null;
-    }
+    const finalWarehouse = role === 2 ? null : [1, 4, 6, 9, 10].includes(role) ? 15 : warehouse_id || null;
 
     const [result] = await connection.query(
       `
@@ -247,6 +239,13 @@ export const createUser = async (req, res) => {
     );
 
     const userId = result.insertId;
+
+    if (finalWarehouse) {
+      await connection.query(
+        `INSERT INTO um_user_warehouses (user_id, warehouse_id, is_active) VALUES (?, ?, 1)`,
+        [userId, finalWarehouse],
+      );
+    }
 
     if (role === 3 && zones.length > 0) {
       const values = zones.map((z) => [userId, z]);
@@ -389,97 +388,6 @@ export const updateUser = async (req, res) => {
     res.json({ message: "update success" });
   } catch (err) {
     console.error("UPDATE USER ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const changeMyPassword = async (req, res) => {
-  try {
-    const now = new Date();
-    if (!req.user) {
-      return res.status(401).json({ message: "unauthorized" });
-    }
-
-    const userId = req.user.id;
-    const { old_password, new_password, confirm_password } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "token ไม่มี user id",
-      });
-    }
-
-    if (!old_password) {
-      return res.status(400).json({
-        message: "กรุณากรอกรหัสผ่านเดิม",
-      });
-    }
-
-    if (!new_password) {
-      return res.status(400).json({
-        message: "กรุณากรอกรหัสผ่านใหม่",
-      });
-    }
-
-    if (new_password.length < 6) {
-      return res.status(400).json({
-        message: "รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร",
-      });
-    }
-
-    if (new_password !== confirm_password) {
-      return res.status(400).json({
-        message: "รหัสผ่านใหม่และยืนยันรหัสผ่านไม่ตรงกัน",
-      });
-    }
-
-    if (old_password === new_password) {
-      return res.status(400).json({
-        message: "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม",
-      });
-    }
-
-    const [rows] = await db.query(
-      `
-      SELECT id, password
-      FROM um_users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId],
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({
-        message: "ไม่พบผู้ใช้งาน",
-      });
-    }
-
-    const user = rows[0];
-
-    if (!(await verifyPassword(old_password, user.password))) {
-      return res.status(400).json({
-        message: "รหัสผ่านเดิมไม่ถูกต้อง",
-      });
-    }
-
-    const hashedPassword = await hashPassword(new_password);
-    await db.query(
-      `
-      UPDATE um_users
-      SET 
-        password = ?,
-        updated_at = ?
-      WHERE id = ?
-      `,
-      [hashedPassword, now, userId],
-    );
-
-    res.json({
-      message: "เปลี่ยนรหัสผ่านสำเร็จ",
-    });
-  } catch (err) {
-    console.error("CHANGE MY PASSWORD ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };

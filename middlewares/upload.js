@@ -38,7 +38,7 @@ export const uploadTruckClosePhoto = multer({
 
 export const uploadDriverDeliveryMedia = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 9, fileSize: 5 * 1024 * 1024 },
+  limits: { files: 9, fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => isSupportedImageMimeType(file.mimetype)
     ? cb(null, true)
     : cb(new Error("รองรับเฉพาะไฟล์รูปภาพ JPG, PNG และ WebP")),

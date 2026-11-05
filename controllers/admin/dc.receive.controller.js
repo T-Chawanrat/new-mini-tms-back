@@ -530,7 +530,7 @@ export const createDcReceive = async (req, res) => {
           AND product_active.serial_no = product_truck.serial_no
         INNER JOIN tm_trucks truck
           ON truck.id = product_truck.truck_load_id
-        WHERE serial_no IN (${placeholders})
+        WHERE product_truck.serial_no IN (${placeholders})
           AND product_truck.status = 'IN_TRANSIT'
           AND truck.to_warehouse_id = ?
       `,

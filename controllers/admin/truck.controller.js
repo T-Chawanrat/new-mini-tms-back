@@ -307,9 +307,10 @@ export const getTruckLoads = async (req, res) => {
       create_date_to,
       is_close,
       is_go,
-      is_completed,
       is_arrived,
     } = req.query;
+    const requestedCompletionStatus = String(req.query.completion_status || "PENDING").toUpperCase();
+    const completionStatus = ["ALL", "PENDING", "COMPLETED"].includes(requestedCompletionStatus) ? requestedCompletionStatus : "PENDING";
 
     const { page, limit, offset } = getPagination(req.query.page, req.query.limit);
     const conditions = [
@@ -336,10 +337,15 @@ export const getTruckLoads = async (req, res) => {
       params.push(create_date_to);
     }
 
+    if (completionStatus === "COMPLETED") {
+      conditions.push("COALESCE(t.is_completed, 'N') = 'Y'");
+    } else if (completionStatus === "PENDING") {
+      conditions.push("COALESCE(t.is_completed, 'N') <> 'Y'");
+    }
+
     const flagFilters = [
       ["t.is_close", cleanYN(is_close)],
       ["t.is_go", cleanYN(is_go)],
-      ["t.is_completed", cleanYN(is_completed)],
       ["t.is_arrived", cleanYN(is_arrived)],
     ];
 

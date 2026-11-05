@@ -4,6 +4,8 @@ import { buildLike } from "../../utils/sql.js";
 import { genderFromTitle, isValidTel } from "../../utils/input.js";
 import { hashPassword } from "../../utils/password.js";
 
+const DEFAULT_WAREHOUSE_ROLE_IDS = [1, 4, 9, 10, 11];
+
 // GET ALL USERS
 export const getUsers = async (req, res) => {
   try {
@@ -107,7 +109,6 @@ export const createUser = async (req, res) => {
       warehouse_id,
       license_no,
       license_expire,
-      zones = [],
     } = req.body;
 
     const defaultPassword = "123456";
@@ -183,15 +184,7 @@ export const createUser = async (req, res) => {
       });
     }
 
-    if (role === 3 && zones.length === 0) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message: "manager ต้องเลือก zone อย่างน้อย 1",
-      });
-    }
-
-    const finalWarehouse = role === 2 ? null : [1, 4, 6, 9, 10].includes(role) ? 15 : warehouse_id || null;
+    const finalWarehouse = role === 2 ? null : DEFAULT_WAREHOUSE_ROLE_IDS.includes(role) ? 15 : warehouse_id || null;
 
     const [result] = await connection.query(
       `
@@ -244,18 +237,6 @@ export const createUser = async (req, res) => {
       await connection.query(
         `INSERT INTO um_user_warehouses (user_id, warehouse_id, is_active) VALUES (?, ?, 1)`,
         [userId, finalWarehouse],
-      );
-    }
-
-    if (role === 3 && zones.length > 0) {
-      const values = zones.map((z) => [userId, z]);
-
-      await connection.query(
-        `
-        INSERT INTO um_user_zones (user_id, zone_id) 
-        VALUES ?
-        `,
-        [values],
       );
     }
 

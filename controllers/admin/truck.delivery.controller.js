@@ -230,8 +230,9 @@ export const getDeliveryTruckOptions = async (req, res) => {
         FROM mm_vehicles
         WHERE status = 'ACTIVE'
           AND is_deleted = 'N'
+          AND warehouse_id = ?
         ORDER BY license_plate
-      `),
+      `, [warehouseId]),
       db.query(`
         SELECT
           vehicle.id AS vehicle_contractor_id,
@@ -367,6 +368,9 @@ export const getDriverDeliveryTruckOptions = async (req, res) => {
 export const getDeliveryTrucks = async (req, res) => {
   try {
     const warehouseId = getWarehouseId(req);
+    const requestedCompletionStatus = String(req.query.completion_status || "PENDING").toUpperCase();
+    const completionStatus = ["ALL", "PENDING", "COMPLETED"].includes(requestedCompletionStatus) ? requestedCompletionStatus : "PENDING";
+    const completionCondition = completionStatus === "ALL" ? "" : completionStatus === "COMPLETED" ? "AND COALESCE(truck.is_arrived, 'N') = 'Y'" : "AND COALESCE(truck.is_arrived, 'N') <> 'Y'";
 
     if (!warehouseId) {
       return res.status(400).json({ success: false, message: "ผู้ใช้งานยังไม่ได้กำหนด Warehouse" });
@@ -410,6 +414,7 @@ export const getDeliveryTrucks = async (req, res) => {
         WHERE truck.status = 'DC_TRUCK'
           AND truck.warehouse_id = ?
           AND COALESCE(truck.is_deleted, 'N') = 'N'
+          ${completionCondition}
         ORDER BY truck.id DESC
       `,
       [warehouseId],
@@ -1302,9 +1307,10 @@ export const createDeliveryTruck = async (req, res) => {
             WHERE id = ?
               AND status = 'ACTIVE'
               AND is_deleted = 'N'
+              AND warehouse_id = ?
             LIMIT 1
           `,
-      driverType === "CONTRACTOR" ? [vehicleContractorId, userTruckId] : [vehicleId],
+      driverType === "CONTRACTOR" ? [vehicleContractorId, userTruckId] : [vehicleId, warehouseId],
     );
 
     const [routeRows] = await connection.query(

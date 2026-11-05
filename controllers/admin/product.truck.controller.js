@@ -5,6 +5,12 @@ import { buildTruckVehicleSql } from "../../utils/truck.js";
 
 const truckVehicleSql = buildTruckVehicleSql();
 
+const PRODUCT_TRUCK_SCOPES = {
+  TRANSFER: { truckStatus: "DC_TRUCK_DC", warehouseColumn: "warehouse_id" },
+  DELIVERY: { truckStatus: "DC_TRUCK", warehouseColumn: "warehouse_id" },
+  INBOUND: { truckStatus: "DC_TRUCK_DC", warehouseColumn: "to_warehouse_id" },
+};
+
 export const getProductTrucks = async (req, res) => {
   try {
     const warehouseId = toNumberOrNull(req.user?.warehouse_id);
@@ -18,8 +24,8 @@ export const getProductTrucks = async (req, res) => {
     const offset = (page - 1) * limit;
     const search = String(req.query.search || "").trim().slice(0, 200);
     const exportAll = req.query.export === "1";
-    const requestedTruckType = String(req.query.truck_type || "").trim().toUpperCase();
-    const truckType = ["DC_TRUCK", "DC_TRUCK_DC"].includes(requestedTruckType) ? requestedTruckType : null;
+    const requestedScope = String(req.query.scope || "TRANSFER").trim().toUpperCase();
+    const scope = PRODUCT_TRUCK_SCOPES[requestedScope] || PRODUCT_TRUCK_SCOPES.TRANSFER;
     const searchValue = `%${search}%`;
     const searchConditions = search
       ? `
@@ -40,8 +46,6 @@ export const getProductTrucks = async (req, res) => {
           )`
       : "";
     const searchParams = search ? Array(18).fill(searchValue) : [];
-    const truckTypeCondition = truckType ? "AND truck.status = ?" : "";
-
     const fromAndWhere = `
       FROM tm_product_trucks product_truck
       INNER JOIN tm_product_actived product_active
@@ -62,11 +66,11 @@ export const getProductTrucks = async (req, res) => {
       LEFT JOIN mm_routes route ON route.route_id = truck.route_id
       WHERE COALESCE(truck.is_deleted, 'N') = 'N'
         AND product_truck.status IN ('LOADED', 'IN_TRANSIT')
-        AND truck.warehouse_id = ?
-        ${truckTypeCondition}
+        AND truck.${scope.warehouseColumn} = ?
+        AND truck.status = ?
         ${searchConditions}
     `;
-    const baseParams = [warehouseId, ...(truckType ? [truckType] : []), ...searchParams];
+    const baseParams = [warehouseId, scope.truckStatus, ...searchParams];
 
     const [summaryRows] = await db.query(
       `SELECT COUNT(*) AS total_items ${fromAndWhere}`,

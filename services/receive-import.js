@@ -140,38 +140,34 @@ export const isEmptyImportRow = (row) => {
 export const parseExcelDate = (value) => {
   if (!value) return null;
 
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, "0");
-    const day = String(value.getDate()).padStart(2, "0");
+  const formatDate = (year, month, day) => {
+    const date = new Date(year, month - 1, day);
 
-    return `${year}-${month}-${day}`;
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+      return null;
+    }
+
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return formatDate(value.getFullYear(), value.getMonth() + 1, value.getDate());
   }
 
   const text = String(value).trim();
 
-  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slashMatch) {
-    const [, dd, mm, yyyy] = slashMatch;
+  const thaiDateMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (thaiDateMatch) {
+    const [, dd, mm, yyyy] = thaiDateMatch;
 
-    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    return formatDate(Number(yyyy), Number(mm), Number(dd));
   }
 
   const dashMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (dashMatch) {
     const [, yyyy, mm, dd] = dashMatch;
 
-    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(text);
-
-  if (!Number.isNaN(parsed.getTime())) {
-    const year = parsed.getFullYear();
-    const month = String(parsed.getMonth() + 1).padStart(2, "0");
-    const day = String(parsed.getDate()).padStart(2, "0");
-
-    return `${year}-${month}-${day}`;
+    return formatDate(Number(yyyy), Number(mm), Number(dd));
   }
 
   return null;
@@ -979,11 +975,17 @@ export const insertImportReceiveSerials = async (conn, receiveId, now, assignedW
         ON pb.id = d.package_detail_id
       LEFT JOIN mm_master_addresses ma
         ON ma.subdistrict_id = h.subdistrict_id
-      LEFT JOIN mm_route_details route_detail
-        ON route_detail.subdistrict_id = h.subdistrict_id
-      LEFT JOIN mm_routes route
-        ON route.route_id = route_detail.route_id
-        AND route.is_deleted = 'N'
+      LEFT JOIN (
+        SELECT
+          route_detail.subdistrict_id,
+          MIN(route.route_id) AS route_id
+        FROM mm_route_details route_detail
+        INNER JOIN mm_routes route
+          ON route.route_id = route_detail.route_id
+          AND route.is_deleted = 'N'
+        GROUP BY route_detail.subdistrict_id
+      ) route
+        ON route.subdistrict_id = h.subdistrict_id
       LEFT JOIN mm_shippers s
         ON s.shipper_id = h.shipper_id
       WHERE h.receive_id = ?

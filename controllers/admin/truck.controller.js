@@ -315,7 +315,6 @@ export const getTruckLoads = async (req, res) => {
     const { page, limit, offset } = getPagination(req.query.page, req.query.limit);
     const conditions = [
       "COALESCE(t.is_deleted, 'N') = 'N'",
-      "COALESCE(t.is_arrived, 'N') <> 'Y'",
       "t.warehouse_id = ?",
       "t.status = 'DC_TRUCK_DC'",
     ];
@@ -338,9 +337,9 @@ export const getTruckLoads = async (req, res) => {
     }
 
     if (completionStatus === "COMPLETED") {
-      conditions.push("COALESCE(t.is_completed, 'N') = 'Y'");
+      conditions.push("COALESCE(t.is_arrived, 'N') = 'Y'");
     } else if (completionStatus === "PENDING") {
-      conditions.push("COALESCE(t.is_completed, 'N') <> 'Y'");
+      conditions.push("COALESCE(t.is_arrived, 'N') <> 'Y'");
     }
 
     const flagFilters = [

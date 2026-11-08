@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { hashPassword, verifyPassword } from "../../utils/password.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const CUSTOMER_ROLE_ID = 2;
 const MANAGER_ROLE_ID = 3;
 const DRIVER_ROLE_ID = 7;
 
@@ -100,6 +101,10 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: "รหัสผ่านไม่ถูกต้อง" });
     }
 
+    if (Number(user.role_id) === CUSTOMER_ROLE_ID) {
+      return res.status(403).json({ message: "บัญชีลูกค้าไม่สามารถเข้าใช้งานระบบ TMS นี้" });
+    }
+
     const warehouses = await getUserWarehouses(user.id);
 
     if (!warehouses.length) {
@@ -191,6 +196,11 @@ export const selectWarehouse = async (req, res) => {
     }
 
     const user = rows[0];
+
+    if (Number(user.role_id) === CUSTOMER_ROLE_ID) {
+      return res.status(403).json({ message: "บัญชีลูกค้าไม่สามารถเข้าใช้งานระบบ TMS นี้" });
+    }
+
     const { zones, vehicles } = await getUserExtras(user);
 
     const now = new Date();

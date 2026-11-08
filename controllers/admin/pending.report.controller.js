@@ -77,9 +77,9 @@ export const getDeliveryReportByDt = async (req, res) => {
 
     if (deliveryStatus === "DELIVERED") {
       where.push("COALESCE(report.total_sn, 0) > 0");
-      where.push("COALESCE(report.delivered_sn, 0) >= COALESCE(report.total_sn, 0)");
+      where.push("COALESCE(report.pending_sn, 0) = 0");
     } else if (deliveryStatus === "PENDING") {
-      where.push("COALESCE(report.delivered_sn, 0) < COALESCE(report.total_sn, 0)");
+      where.push("COALESCE(report.pending_sn, 0) > 0");
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";

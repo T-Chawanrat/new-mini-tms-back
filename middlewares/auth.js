@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import db from "../config/db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const CUSTOMER_ROLE_ID = 2;
 
 export const auth = async (req, res, next) => {
   try {
@@ -39,11 +40,12 @@ export const auth = async (req, res, next) => {
           ON user_warehouse.user_id = app_user.id
         WHERE app_user.id = ?
           AND app_user.is_active = 1
+          AND app_user.role_id <> ?
           AND user_warehouse.warehouse_id = ?
           AND user_warehouse.is_active = 1
         LIMIT 1
       `,
-      [userId, warehouseId],
+      [userId, CUSTOMER_ROLE_ID, warehouseId],
     );
 
     if (!rows.length) {

@@ -370,7 +370,7 @@ export const getDeliveryTrucks = async (req, res) => {
     const warehouseId = getWarehouseId(req);
     const requestedCompletionStatus = String(req.query.completion_status || "PENDING").toUpperCase();
     const completionStatus = ["ALL", "PENDING", "COMPLETED"].includes(requestedCompletionStatus) ? requestedCompletionStatus : "PENDING";
-    const completionCondition = completionStatus === "ALL" ? "" : completionStatus === "COMPLETED" ? "AND COALESCE(truck.is_arrived, 'N') = 'Y'" : "AND COALESCE(truck.is_arrived, 'N') <> 'Y'";
+    const completionCondition = completionStatus === "ALL" ? "" : completionStatus === "COMPLETED" ? "AND COALESCE(truck.is_completed, 'N') = 'Y'" : "AND COALESCE(truck.is_completed, 'N') <> 'Y'";
 
     if (!warehouseId) {
       return res.status(400).json({ success: false, message: "ผู้ใช้งานยังไม่ได้กำหนด Warehouse" });

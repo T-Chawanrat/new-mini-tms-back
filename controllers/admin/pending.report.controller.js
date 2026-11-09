@@ -15,10 +15,16 @@ const getDateRange = (query) => {
 
 const buildSerialFilter = ({ parentCondition, query }) => {
   const search = cleanText(query.search);
+  const customerId = toNumberOrNull(query.customer_id);
   const toWarehouseId = toNumberOrNull(query.to_warehouse_id);
   const { dateFrom, dateTo } = getDateRange(query);
   const where = [parentCondition];
   const params = [];
+
+  if (customerId !== null) {
+    where.push("serial_report.customer_id = ?");
+    params.push(customerId);
+  }
 
   if (toWarehouseId !== null) {
     where.push("serial_report.to_warehouse_id = ?");
@@ -161,6 +167,7 @@ export const getDeliveryReportByReceive = async (req, res) => {
 export const getDeliveryReportBySn = async (req, res) => {
   try {
     const search = cleanText(req.query.search);
+    const customerId = toNumberOrNull(req.query.customer_id);
     const toWarehouseId = toNumberOrNull(req.query.to_warehouse_id);
     const deliveryStatus = cleanText(req.query.delivery_status)?.toUpperCase();
     const { dateFrom, dateTo } = getDateRange(req.query);
@@ -173,6 +180,11 @@ export const getDeliveryReportBySn = async (req, res) => {
         OR ${buildLike("report.serial_no", search)}
         OR ${buildLike("report.reference_no", search)}
       )`);
+    }
+
+    if (customerId !== null) {
+      where.push("report.customer_id = ?");
+      params.push(customerId);
     }
 
     if (toWarehouseId !== null) {

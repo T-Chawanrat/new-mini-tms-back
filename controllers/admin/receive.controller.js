@@ -200,11 +200,44 @@ export const getReceiveRecipients = async (req, res) => {
 export const getReceivePackages = async (req, res) => {
   try {
     const { customer_id } = req.params;
-    const { search } = req.query;
+    const { search, shipper_id, recipient_detail_id } = req.query;
 
-    if (!customer_id) {
-      return res.status(400).json({ message: "customer_id is required" });
+    if (!customer_id || !shipper_id || !recipient_detail_id) {
+      return res.status(400).json({ message: "customer_id, shipper_id and recipient_detail_id are required" });
     }
+
+    const [warehouseRows] = await db.query(
+      `
+        SELECT
+          from_address.warehouse_id AS from_warehouse_id,
+          to_address.warehouse_id AS to_warehouse_id
+        FROM mm_shippers shipper
+        INNER JOIN mm_recipient_details recipient_detail
+          ON recipient_detail.recipient_detail_id = ?
+          AND recipient_detail.is_deleted = 'N'
+        INNER JOIN mm_recipients recipient
+          ON recipient.recipient_id = recipient_detail.recipient_id
+          AND recipient.customer_id = shipper.customer_id
+          AND recipient.is_deleted = 'N'
+        LEFT JOIN mm_master_addresses from_address
+          ON from_address.subdistrict_id = shipper.subdistrict_id
+        LEFT JOIN mm_master_addresses to_address
+          ON to_address.subdistrict_id = recipient_detail.subdistrict_id
+        WHERE shipper.shipper_id = ?
+          AND shipper.customer_id = ?
+          AND shipper.is_deleted = 'N'
+        LIMIT 1
+      `,
+      [recipient_detail_id, shipper_id, customer_id],
+    );
+
+    const warehouse = warehouseRows[0];
+
+    if (!warehouse?.from_warehouse_id || !warehouse?.to_warehouse_id) {
+      return res.status(400).json({ message: "ไม่พบคลังต้นทางหรือคลังปลายทางจากผู้ส่งและผู้รับ" });
+    }
+
+    const priceColumn = Number(warehouse.from_warehouse_id) === Number(warehouse.to_warehouse_id) ? "d.cost" : "d.cost_difference_warehouse";
 
     const searchText = search ? String(search).trim() : "";
 
@@ -248,7 +281,7 @@ export const getReceivePackages = async (req, res) => {
         d.size_max,
         d.weight_min,
         d.weight_max,
-        d.cost,
+        ${priceColumn} AS cost,
         d.cost_difference_warehouse,
         d.cost_go,
         d.cost_return,

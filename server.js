@@ -6,41 +6,55 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import morgan from "morgan";
-// import authRoute from "./routes/";
-import filterRoute from "./routes/admin/filter.routes.js";
-// import labelRoute from "./routes/labelRoute.js";
-import authRoute from "./routes/admin/auth.routes.js";
-import manageRoutes from "./routes/admin/manage.route.js";
-import receiveRoute from "./routes/admin/receive.route.js";
-import createReceiveRoute from "./routes/admin/receive.create.routes.js";
-import receiveImportRoutes from "./routes/admin/receive.import.routes.js";
-import manageHolidayRoutes from "./routes/admin/manage.holiday.routes.js";
-import receiveReportRoute from "./routes/admin/receive.report.route.js";
-import labelRoute from "./routes/admin/label.route.js";
-import warehouseReceiveRoutes from "./routes/admin/warehouse.receive.routes.js";
-import productWarehouseRoutes from "./routes/admin/product.warehouse.routes.js";
-import productTruckRoutes from "./routes/admin/product.truck.route.js";
-import truckLoadRoutes from "./routes/admin/truck.route.js";
-import driverTruckRoutes from "./routes/driver/driver.truck.route.js";
-import driverDeliveryTruckRoutes from "./routes/driver/driver.delivery.truck.route.js";
-import driverDeliveriesRoutes from "./routes/driver/driver.deliveries.route.js";
-import driverMileageRoutes from "./routes/driver/driver.mileage.route.js";
-import driverDeliveryIssueRoutes from "./routes/driver/driver.delivery.issue.route.js";
-import driverReturnRoutes from "./routes/driver/driver.return.route.js";
-import dcReceiveRoutes from "./routes/admin/dc.receive.routes.js";
-import moveTkRoutes from "./routes/admin/move.tk.routes.js";
-import moveDtRoutes from "./routes/admin/move.dt.routes.js";
-import moveDcRoutes from "./routes/admin/move.dc.route.js";
-import contractorRoutes from "./routes/admin/contractor.routes.js";
-import driverAuthRoute from "./routes/driver/driver.auth.route.js";
-import truckDeliveryRoutes from "./routes/admin/truck.delivery.route.js";
-import deliveryCloseRoutes from "./routes/admin/delivery.close.route.js";
-import deliveryCloseMediaRoutes from "./routes/admin/delivery.close.media.route.js";
-import pendingReportRoutes from "./routes/admin/pending.report.route.js";
-import issueRoutes from "./routes/admin/issue.route.js";
-import oilPriceRoutes from "./routes/admin/oil-price.route.js";
+// Admin routes
 import announcementRoutes from "./routes/admin/announcement.route.js";
+import authRoute from "./routes/admin/auth.routes.js";
+import contractorRoutes from "./routes/admin/contractor.routes.js";
+import dcReceiveRoutes from "./routes/admin/dc.receive.routes.js";
+import deliveryCloseMediaRoutes from "./routes/admin/delivery.close.media.route.js";
+import deliveryCloseRoutes from "./routes/admin/delivery.close.route.js";
+import filterRoute from "./routes/admin/filter.routes.js";
+import issueRoutes from "./routes/admin/issue.route.js";
+import labelRoute from "./routes/admin/label.route.js";
 import logRoutes from "./routes/admin/log.route.js";
+import manageHolidayRoutes from "./routes/admin/manage.holiday.routes.js";
+import manageRoutes from "./routes/admin/manage.route.js";
+import moveDcRoutes from "./routes/admin/move.dc.route.js";
+import moveDtRoutes from "./routes/admin/move.dt.routes.js";
+import moveTkRoutes from "./routes/admin/move.tk.routes.js";
+import oilPriceRoutes from "./routes/admin/oil-price.route.js";
+import pendingReportRoutes from "./routes/admin/pending.report.route.js";
+import productTruckRoutes from "./routes/admin/product.truck.route.js";
+import productWarehouseRoutes from "./routes/admin/product.warehouse.routes.js";
+import receiveImportRoutes from "./routes/admin/receive.import.routes.js";
+import createReceiveRoute from "./routes/admin/receive.create.routes.js";
+import receiveReportRoute from "./routes/admin/receive.report.route.js";
+import receiveRoute from "./routes/admin/receive.route.js";
+import truckDeliveryRoutes from "./routes/admin/truck.delivery.route.js";
+import truckLoadRoutes from "./routes/admin/truck.route.js";
+import warehouseReceiveRoutes from "./routes/admin/warehouse.receive.routes.js";
+
+// Customer routes
+import customerAnnouncementRoute from "./routes/customer/announcement.route.js";
+import customerAuthRoute from "./routes/customer/auth.routes.js";
+import customerFilterRoute from "./routes/customer/filter.routes.js";
+import customerLabelRoute from "./routes/customer/label.route.js";
+import customerRecipientRoute from "./routes/customer/manage.recipient.route.js";
+import customerShipperRoute from "./routes/customer/manage.shipper.route.js";
+import customerOilPriceRoute from "./routes/customer/oil-price.route.js";
+import customerCreateReceiveRoute from "./routes/customer/receive.create.routes.js";
+import customerReceiveImportRoute from "./routes/customer/receive.import.routes.js";
+import customerReceiveReportRoute from "./routes/customer/receive.report.route.js";
+import customerReceiveRoute from "./routes/customer/receive.route.js";
+
+// Driver routes
+import driverAuthRoute from "./routes/driver/driver.auth.route.js";
+import driverDeliveriesRoutes from "./routes/driver/driver.deliveries.route.js";
+import driverDeliveryIssueRoutes from "./routes/driver/driver.delivery.issue.route.js";
+import driverDeliveryTruckRoutes from "./routes/driver/driver.delivery.truck.route.js";
+import driverMileageRoutes from "./routes/driver/driver.mileage.route.js";
+import driverReturnRoutes from "./routes/driver/driver.return.route.js";
+import driverTruckRoutes from "./routes/driver/driver.truck.route.js";
 import { error } from "./middlewares/error.js";
 import { initializeSocketServer } from "./services/realtime/socket.js";
 
@@ -61,9 +75,8 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/labels", express.static(path.join(__dirname, "labels")));
 
-// app.use("/", authRoute);
+// Admin routes
 app.use("/", filterRoute);
-// app.use("/", labelRoute);
 app.use("/", authRoute);
 app.use("/manage", manageRoutes);
 app.use("/receives", receiveRoute);
@@ -76,12 +89,6 @@ app.use("/warehouse-receives", warehouseReceiveRoutes);
 app.use("/product-warehouses", productWarehouseRoutes);
 app.use("/product-trucks", productTruckRoutes);
 app.use("/truck-loads", truckLoadRoutes);
-app.use("/driver/trucks", driverTruckRoutes);
-app.use("/driver/delivery-trucks", driverDeliveryTruckRoutes);
-app.use("/driver/deliveries", driverDeliveriesRoutes);
-app.use("/driver/mileage", driverMileageRoutes);
-app.use("/driver/delivery-issues", driverDeliveryIssueRoutes);
-app.use("/driver/returns", driverReturnRoutes);
 app.use("/delivery-trucks", truckDeliveryRoutes);
 app.use("/delivery-closes", deliveryCloseRoutes);
 app.use("/delivery-close-media", deliveryCloseMediaRoutes);
@@ -95,27 +102,30 @@ app.use("/contractors", contractorRoutes);
 app.use("/oil-prices", oilPriceRoutes);
 app.use("/announcements", announcementRoutes);
 app.use("/logs", logRoutes);
+
+// Customer routes
+app.use("/customer", customerFilterRoute);
+app.use("/customer", customerAuthRoute);
+app.use("/customer/manage/recipients", customerRecipientRoute);
+app.use("/customer/manage/shippers", customerShipperRoute);
+app.use("/customer/receives", customerReceiveRoute);
+app.use("/customer/create", customerCreateReceiveRoute);
+app.use("/customer/create", customerReceiveImportRoute);
+app.use("/customer/receive-report", customerReceiveReportRoute);
+app.use("/customer/labels", customerLabelRoute);
+app.use("/customer/oil-prices", customerOilPriceRoute);
+app.use("/customer/announcements", customerAnnouncementRoute);
+
+// Driver routes
+app.use("/driver/trucks", driverTruckRoutes);
+app.use("/driver/delivery-trucks", driverDeliveryTruckRoutes);
+app.use("/driver/deliveries", driverDeliveriesRoutes);
+app.use("/driver/mileage", driverMileageRoutes);
+app.use("/driver/delivery-issues", driverDeliveryIssueRoutes);
+app.use("/driver/returns", driverReturnRoutes);
 app.use("/driver", driverAuthRoute);
 
-
 app.use(error);
-
-// const sslOptions = {
-//   key: fs.readFileSync(
-//     "/home/xsendwork/conf/web/xsendwork.com/ssl/xsendwork.com.key"
-//   ),
-//   cert: fs.readFileSync(
-//     "/home/xsendwork/conf/web/xsendwork.com/ssl/xsendwork.com.crt"
-//   ),
-//   ca: fs.readFileSync(
-//     "/home/xsendwork/conf/web/xsendwork.com/ssl/xsendwork.com.ca"
-//   ),
-// };
-
-// const PORT = process.env.PORT || 8001;
-// https.createServer(sslOptions, app).listen(PORT, () => {
-//   console.log(`🚀 Server running on https://localhost:${PORT}`);
-// });
 
 const PORT = process.env.PORT || 8001;
 const httpServer = http.createServer(app);

@@ -20,6 +20,7 @@ export const auth = async (req, res, next) => {
 
     const decoded = jwt.verify(parts[1], JWT_SECRET);
     const userId = Number(decoded.id);
+
     const warehouseId = Number(decoded.warehouse_id);
 
     if (
@@ -64,6 +65,44 @@ export const auth = async (req, res, next) => {
     }
 
     console.error("auth middleware error:", error);
+    return res.status(500).json({ message: "ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้งานได้" });
+  }
+};
+
+export const customerAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: "no token" });
+
+    const parts = authHeader.split(" ");
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
+      return res.status(401).json({ message: "invalid token format" });
+    }
+
+    const decoded = jwt.verify(parts[1], JWT_SECRET);
+    const userId = Number(decoded.id);
+    const customerId = Number(decoded.customer_id);
+    if (
+      decoded.purpose !== "CUSTOMER_ACCESS" ||
+      Number(decoded.role_id) !== CUSTOMER_ROLE_ID ||
+      !Number.isInteger(userId) || userId <= 0 ||
+      !Number.isInteger(customerId) || customerId <= 0
+    ) {
+      return res.status(401).json({ message: "invalid customer access token" });
+    }
+
+    const [rows] = await db.query(
+      "SELECT id FROM um_users WHERE id = ? AND role_id = ? AND customer_id = ? AND is_active = 1 LIMIT 1",
+      [userId, CUSTOMER_ROLE_ID, customerId],
+    );
+    if (!rows.length) return res.status(401).json({ message: "customer access denied" });
+
+    req.user = decoded;
+    return next();
+  } catch (error) {
+    if (error.name === "TokenExpiredError") return res.status(401).json({ message: "token expired" });
+    if (error.name === "JsonWebTokenError" || error.name === "NotBeforeError") return res.status(401).json({ message: "invalid token" });
+    console.error("customer auth middleware error:", error);
     return res.status(500).json({ message: "ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้งานได้" });
   }
 };

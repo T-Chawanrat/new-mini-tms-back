@@ -576,7 +576,7 @@ export const buildImportHeadData = ({ row, customerId, shipper, receiveCode, rec
   };
 };
 
-const findMatchedPackageBusiness = ({ businessRows, q, weight }) => {
+const findMatchedPackageBusiness = ({ businessRows, q, weight, useDifferentWarehousePrice }) => {
   const activeRows = businessRows.filter((row) => {
     return row && isYN(row.business_is_deleted, "N");
   });
@@ -626,8 +626,9 @@ const findMatchedPackageBusiness = ({ businessRows, q, weight }) => {
     };
   }
 
-  const sizeCost = toNumberOrZero(sizeMatchedRow.cost);
-  const weightCost = toNumberOrZero(weightMatchedRow.cost);
+  const priceField = useDifferentWarehousePrice ? "cost_difference_warehouse" : "cost";
+  const sizeCost = toNumberOrZero(sizeMatchedRow[priceField]);
+  const weightCost = toNumberOrZero(weightMatchedRow[priceField]);
 
   if (weightCost > sizeCost) {
     return {
@@ -646,7 +647,7 @@ const findMatchedPackageBusiness = ({ businessRows, q, weight }) => {
   };
 };
 
-export const getPackageByCode = async ({ conn, customerId, packageCode, q, weight, cache }) => {
+export const getPackageByCode = async ({ conn, customerId, packageCode, q, weight, useDifferentWarehousePrice, cache }) => {
   const cleanCustomerId = toNumberOrNull(customerId);
   const cleanPackageCode = cleanText(packageCode);
 
@@ -714,6 +715,7 @@ export const getPackageByCode = async ({ conn, customerId, packageCode, q, weigh
     businessRows: packageRows,
     q,
     weight,
+    useDifferentWarehousePrice,
   });
 
   if (!matched) {
@@ -733,7 +735,7 @@ export const getPackageByCode = async ({ conn, customerId, packageCode, q, weigh
 
     unit_id: selected.unit_id,
 
-    cost: toNumberOrZero(selected.cost),
+    cost: toNumberOrZero(useDifferentWarehousePrice ? selected.cost_difference_warehouse : selected.cost),
     cost_difference: toNumberOrZero(selected.cost_difference_warehouse),
 
     price_by: matched.priceBy,

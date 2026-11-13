@@ -244,9 +244,9 @@ export const createCustomerUser = async (req, res) => {
       INSERT INTO um_users (
         username, password, first_name, last_name,
         role_id, customer_id, warehouse_id,
-        license_no, license_expire, is_active
+        license_no, license_expire, employment_type, is_active
       )
-      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 1)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'CUSTOMER', 1)
       `,
       [
         username,

@@ -173,6 +173,7 @@ export const importReceivesFromExcel = async (req, res) => {
           packageCode: row.package_code,
           q: row.q,
           weight: row.weight,
+          useDifferentWarehousePrice: data.from_warehouse_id !== data.to_warehouse_id,
           cache: packageCache,
         });
 

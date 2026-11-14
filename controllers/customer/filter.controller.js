@@ -1,151 +1,6 @@
 import db from "../../config/db.js";
 import { buildLike } from "../../utils/sql.js";
 
-// GET ROLES
-export const getRoles = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT id, name
-      FROM mm_roles
-      ORDER BY name ASC
-    `);
-
-    res.json(rows);
-  } catch (err) {
-    console.error("roles error:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const getDriverUsers = async (req, res) => {
-  try {
-    const sql = `
-      SELECT
-        id,
-        employee_code,
-        title_name,
-        first_name,
-        last_name,
-        gender,
-        citizen_id,
-        tel,
-        role_id,
-        warehouse_id,
-        license_no,
-        license_expire
-      FROM um_users
-      WHERE role_id = 7
-      ORDER BY employee_code ASC,
-    `;
-
-    const [rows] = await db.query(sql);
-
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    console.error("getDriverUsers error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "ไม่สามารถโหลดรายชื่อพนักงานขับรถได้",
-      error: error.message,
-    });
-  }
-};
-
-export const getActiveVehicles = async (req, res) => {
-  try {
-    const sql = `
-      SELECT
-        v.id,
-        v.license_plate,
-        v.license_plate_province_id,
-        v.license_plate_province,
-
-        v.model,
-        v.color,
-        v.vehicle_year,
-
-        v.vehicle_type_id,
-        vt.name AS vehicle_type_name,
-
-        v.fuel_type,
-        v.capacity_kg,
-        v.max_load_kg,
-
-        v.warehouse_id,
-        w.warehouse_name,
-
-        v.owner_type,
-        v.owner_name,
-        v.purchase_date,
-        v.fleet_card_no,
-        v.chassis_no,
-        v.engine_no
-
-      FROM mm_vehicles v
-
-      LEFT JOIN mm_vehicle_types vt
-        ON vt.id = v.vehicle_type_id
-
-      LEFT JOIN mm_warehouses_to w
-        ON w.warehouse_id = v.warehouse_id
-
-      WHERE v.status = 'ACTIVE'
-      ORDER BY v.license_plate ASC
-    `;
-
-    const [rows] = await db.query(sql);
-
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    console.error("getActiveVehicles error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "ไม่สามารถโหลดรายการรถได้",
-      error: error.message,
-    });
-  }
-};
-
-export const getCustomers = async (req, res) => {
-  try {
-    const { search } = req.query;
-
-    let sql = `
-      SELECT *
-      FROM mm_customers
-      WHERE is_active = '1'
-    `;
-
-    if (search) {
-      sql += `
-        AND (
-          ${buildLike("code", search)}
-          OR ${buildLike("name", search)}
-        )
-      `;
-    }
-
-    sql += `
-      ORDER BY id ASC
-    `;
-
-    const [rows] = await db.query(sql);
-
-    res.json(rows);
-  } catch (err) {
-    console.error("customers error:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
 export const getReceiveCustomers = async (req, res) => {
   try {
     if (!req.user) {
@@ -198,21 +53,6 @@ export const getWarehouses = async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error("warehouses error:", err);
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const getZones = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT id, zone_name
-      FROM mm_zones
-      ORDER BY id ASC
-    `);
-
-    res.json(rows);
-  } catch (err) {
-    console.error("zone error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -280,34 +120,6 @@ export const getRecipientTypes = async (req, res) => {
   }
 };
 
-export const getVehicleBrands = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT id, name
-      FROM mm_vehicle_brands
-      ORDER BY name ASC
-    `);
-
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-export const getVehicleTypes = async (req, res) => {
-  try {
-    const [rows] = await db.query(`
-      SELECT id, name, default_max_load_kg
-      FROM mm_vehicle_types
-      ORDER BY id ASC
-    `);
-
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
 export const getReceivePayments = async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -328,26 +140,6 @@ export const getReceivePayments = async (req, res) => {
   }
 };
 
-export const getReceiveDeliveryTypes = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `
-        SELECT
-          id,
-          name
-        FROM mm_delivery_types
-        WHERE 1 = 1
-        ORDER BY id ASC
-      `,
-    );
-
-    return res.json(rows);
-  } catch (err) {
-    console.error("GET RECEIVE DELIVERY TYPES ERROR:", err);
-    return res.status(500).json({ message: err.message });
-  }
-};
-
 export const getProvinces = async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -364,24 +156,6 @@ export const getProvinces = async (req, res) => {
     return res.json(rows);
   } catch (err) {
     console.error("GET PROVINCES ERROR:", err);
-    return res.status(500).json({ message: err.message });
-  }
-};
-export const getSendProblems = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `
-        SELECT
-          reason_send_problem_id,
-          reason_send_problem_detail
-        FROM mm_reason_send_problems
-        ORDER BY reason_send_problem_detail ASC
-      `
-    );
-
-    return res.json(rows);
-  } catch (err) {
-    console.error("GET REASON SEND PROBLEMS ERROR:", err);
     return res.status(500).json({ message: err.message });
   }
 };

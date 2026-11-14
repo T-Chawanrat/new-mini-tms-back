@@ -11,27 +11,13 @@ export const getRecipients = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { customer_id } = req.params;
     const { search } = req.query;
     const { page, pageSize, skip } = getPaginationParams(req, 100, 200);
+    const customerId = Number(req.user.customer_id);
 
-    const isCustomer = Number(req.user.role_id) === 2;
-
-    if (isCustomer && !req.user.customer_id) {
+    if (!Number.isInteger(customerId) || customerId <= 0) {
       return res.status(403).json({
         message: "customer user has no customer_id",
-      });
-    }
-
-    if (!isCustomer && !customer_id) {
-      return res.json({
-        data: [],
-        pagination: {
-          page,
-          pageSize,
-          total: 0,
-          totalPages: 0,
-        },
       });
     }
 
@@ -42,15 +28,8 @@ export const getRecipients = async (req, res) => {
 
     const params = [];
 
-    if (isCustomer) {
-      whereSql += ` AND r.customer_id = ? `;
-      params.push(req.user.customer_id);
-    }
-
-    if (!isCustomer && customer_id) {
-      whereSql += ` AND r.customer_id = ? `;
-      params.push(customer_id);
-    }
+    whereSql += ` AND r.customer_id = ? `;
+    params.push(customerId);
 
     const fromSql = `
       FROM mm_recipients r
@@ -157,11 +136,10 @@ export const getRecipientDetails = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { customerId, recipientId } = req.params;
-    const isCustomer = Number(req.user.role_id) === 2;
-    const allowedCustomerId = isCustomer ? req.user.customer_id : customerId;
+    const { recipientId } = req.params;
+    const allowedCustomerId = Number(req.user.customer_id);
 
-    if (!allowedCustomerId) {
+    if (!Number.isInteger(allowedCustomerId) || allowedCustomerId <= 0) {
       return res.status(403).json({ message: "customer_id required" });
     }
 

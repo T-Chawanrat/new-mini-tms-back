@@ -28,14 +28,13 @@ export const createReceive = async (req, res) => {
       });
     }
 
-    const isCustomer = Number(req.user.role_id) === 2;
     const userId = toNumberOrNull(req.user.user_id ?? req.user.id ?? req.user.people_id ?? req.user.employee_id);
 
     const body = req.body || {};
     const receiveHeader = body.receiveHeader || body;
     const packageRows = normalizePackageRows(body.packageRows);
 
-    const finalCustomerId = isCustomer ? toNumberOrNull(req.user.customer_id) : toNumberOrNull(receiveHeader.customer_id);
+    const finalCustomerId = toNumberOrNull(req.user.customer_id);
 
     const shipperId = toNumberOrNull(receiveHeader.shipper_id);
 
@@ -46,7 +45,7 @@ export const createReceive = async (req, res) => {
 
     if (!finalCustomerId) {
       return res.status(400).json({
-        message: "กรุณาเลือกเจ้าของงาน",
+        message: "ไม่พบ Customer ของผู้ใช้งาน",
       });
     }
 

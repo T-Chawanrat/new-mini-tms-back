@@ -43,13 +43,14 @@ const activeItemWhere = (alias = "t") => {
   `;
 };
 
-const buildReceiveReportWhere = (query, alias = "t") => {
+const customerIdFromRequest = (req) => toNumberOrNull(req.user?.customer_id);
+
+const buildReceiveReportWhere = (query, customerId, alias = "t") => {
   const where = [];
   const params = [];
 
   const receiveCode = cleanText(query.receive_code);
   const serialNo = cleanText(query.serial_no);
-  const customerId = toNumberOrNull(query.customer_id);
   const toWarehouseId = toNumberOrNull(query.to_warehouse_id);
 
   const receiveDateFrom = formatDateTime(query.receive_date_from ? `${query.receive_date_from} 00:00:00` : null);
@@ -79,10 +80,8 @@ const buildReceiveReportWhere = (query, alias = "t") => {
     params.push(`%${receiveCode}%`, `%${receiveCode}%`, `%${receiveCode}%`);
   }
 
-  if (customerId !== null) {
-    where.push(`${alias}.customer_id = ?`);
-    params.push(customerId);
-  }
+  where.push(`${alias}.customer_id = ?`);
+  params.push(customerId);
 
   if (toWarehouseId !== null) {
     where.push(`${alias}.to_warehouse_id = ?`);
@@ -110,12 +109,14 @@ const buildReceiveReportWhere = (query, alias = "t") => {
 
 export const getReceiveReport = async (req, res) => {
   try {
+    const customerId = customerIdFromRequest(req);
+    if (!customerId) return res.status(403).json({ success: false, message: "customer_id required" });
     const page = toPositiveInt(req.query.page, DEFAULT_PAGE);
     const rawLimit = toPositiveInt(req.query.limit, DEFAULT_LIMIT);
     const limit = Math.min(rawLimit, MAX_LIMIT);
     const offset = (page - 1) * limit;
 
-    const { whereSql, params } = buildReceiveReportWhere(req.query, "t");
+    const { whereSql, params } = buildReceiveReportWhere(req.query, customerId, "t");
 
     const countSql = `
       SELECT COUNT(*) AS total
@@ -271,6 +272,8 @@ export const getReceiveReport = async (req, res) => {
 
 export const getReceiveReportSerials = async (req, res) => {
   try {
+    const customerId = customerIdFromRequest(req);
+    if (!customerId) return res.status(403).json({ success: false, message: "customer_id required" });
     const receiveBusinessId = toNumberOrNull(req.params.receiveBusinessId);
 
     if (!receiveBusinessId) {
@@ -302,12 +305,13 @@ export const getReceiveReportSerials = async (req, res) => {
 
       FROM vw_receive_report_serials t
       WHERE t.receive_business_id = ?
+        AND t.customer_id = ?
         AND ${activeItemWhere("t")}
       ORDER BY
         t.serial_no ASC
     `;
 
-    const [rows] = await db.query(sql, [receiveBusinessId]);
+    const [rows] = await db.query(sql, [receiveBusinessId, customerId]);
 
     return res.json({
       success: true,
@@ -325,6 +329,8 @@ export const getReceiveReportSerials = async (req, res) => {
 
 export const getReceiveReportPrint = async (req, res) => {
   try {
+    const customerId = customerIdFromRequest(req);
+    if (!customerId) return res.status(403).json({ success: false, message: "customer_id required" });
     const receiveBusinessId = toNumberOrNull(req.params.receiveBusinessId);
 
     if (!receiveBusinessId) {
@@ -364,6 +370,7 @@ export const getReceiveReportPrint = async (req, res) => {
         COALESCE(SUM(t.line_total_cod), 0) AS total_cod
       FROM vw_receive_report_print t
       WHERE t.receive_business_id = ?
+        AND t.customer_id = ?
       GROUP BY t.receive_business_id
     `;
 
@@ -382,10 +389,11 @@ export const getReceiveReportPrint = async (req, res) => {
         t.line_total_weight
       FROM vw_receive_report_print t
       WHERE t.receive_business_id = ?
+        AND t.customer_id = ?
       ORDER BY t.package_name ASC, t.package_detail_name ASC, t.unit_cost ASC
     `;
 
-    const [[header], [items]] = await Promise.all([db.query(headerSql, [receiveBusinessId]), db.query(itemSql, [receiveBusinessId])]);
+    const [[header], [items]] = await Promise.all([db.query(headerSql, [receiveBusinessId, customerId]), db.query(itemSql, [receiveBusinessId, customerId])]);
 
     if (!header?.[0]) {
       return res.status(404).json({ success: false, message: "ไม่พบข้อมูลบิล" });
@@ -400,7 +408,9 @@ export const getReceiveReportPrint = async (req, res) => {
 
 export const getReceiveReportSummary = async (req, res) => {
   try {
-    const { whereSql, params } = buildReceiveReportWhere(req.query, "t");
+    const customerId = customerIdFromRequest(req);
+    if (!customerId) return res.status(403).json({ success: false, message: "customer_id required" });
+    const { whereSql, params } = buildReceiveReportWhere(req.query, customerId, "t");
 
     const totalSql = `
       SELECT

@@ -3,6 +3,7 @@ import db from "../../config/db.js";
 import { buildLike } from "../../utils/sql.js";
 import { cleanText, toNumberOrNull } from "../../utils/input.js";
 import { getPagination } from "../../utils/pagination.js";
+import { getPrintSummaryJoinSql } from "../../services/label.js";
 
 const activeSerialCondition = `
   (
@@ -15,36 +16,13 @@ const activeSerialCondition = `
   )
 `;
 
-const getPrintSummaryJoinSql = () => {
-  return `
-    LEFT JOIN (
-      SELECT
-        serial_no,
-        COUNT(*) AS total_print_count,
-        SUM(
-          CASE
-            WHEN print_type = 'REPRINT' THEN 1
-            ELSE 0
-          END
-        ) AS reprint_count,
-        MAX(created_at) AS last_printed_at
-      FROM logs_label_print
-      GROUP BY serial_no
-    ) lp
-      ON lp.serial_no = rs.serial_no
-  `;
-};
-
-const getMasterJoinSql = () => {
+const getReceiveMasterJoinSql = () => {
   return `
     LEFT JOIN mm_customers c
       ON c.id = rs.customer_id
 
     LEFT JOIN mm_warehouses_to wt
       ON wt.warehouse_id = rs.to_warehouse_id
-
-    LEFT JOIN mm_warehouses_to wf
-      ON wf.warehouse_id = rs.from_warehouse_id
 
     LEFT JOIN (
       SELECT
@@ -60,6 +38,15 @@ const getMasterJoinSql = () => {
           THEN rs.receive_walkin_id
         ELSE NULL
       END
+  `;
+};
+
+const getSerialMasterJoinSql = () => {
+  return `
+    ${getReceiveMasterJoinSql()}
+
+    LEFT JOIN mm_warehouses_to wf
+      ON wf.warehouse_id = rs.from_warehouse_id
 
     LEFT JOIN mm_recipient_details rd
       ON rd.recipient_detail_id = rs.recipient_detail_id
@@ -89,7 +76,7 @@ const getFromWarehouseNameSelectSql = () => {
   `;
 };
 
-const buildReceiveWhere = (query) => {
+const buildLabelWhere = (query, { exactReceiveCode = false, includeSearch = false } = {}) => {
   const { receive_date, customer_id, to_warehouse_id, receive_code, serial_no, search } = query;
 
   const where = [];
@@ -101,54 +88,17 @@ const buildReceiveWhere = (query) => {
   where.push("rs.serial_no <> ''");
   where.push(activeSerialCondition);
 
-  if (receive_date) {
-    where.push("DATE(rs.receive_date) = ?");
-    params.push(receive_date);
-  }
-
-  if (customer_id) {
-    where.push("rs.customer_id = ?");
-    params.push(customer_id);
-  }
-
-  if (to_warehouse_id) {
-    where.push("rs.to_warehouse_id = ?");
-    params.push(to_warehouse_id);
-  }
-
   if (receive_code) {
-    where.push(buildLike("rs.receive_code", receive_code));
+    if (exactReceiveCode) {
+      where.push("rs.receive_code = ?");
+      params.push(receive_code);
+    } else {
+      where.push(buildLike("rs.receive_code", receive_code));
+    }
   }
 
-  if (search) {
+  if (includeSearch && search) {
     where.push(`(${buildLike("rs.receive_code", search)} OR ${buildLike("rs.serial_no", search)})`);
-  }
-
-  if (serial_no) {
-    where.push(buildLike("rs.serial_no", serial_no));
-  }
-
-  return {
-    whereSql: `WHERE ${where.join(" AND ")}`,
-    params,
-  };
-};
-
-const buildSerialWhere = (query) => {
-  const { receive_code, serial_no, customer_id, to_warehouse_id, receive_date } = query;
-
-  const where = [];
-  const params = [];
-
-  where.push("rs.receive_code IS NOT NULL");
-  where.push("rs.receive_code <> ''");
-  where.push("rs.serial_no IS NOT NULL");
-  where.push("rs.serial_no <> ''");
-  where.push(activeSerialCondition);
-
-  if (receive_code) {
-    where.push("rs.receive_code = ?");
-    params.push(receive_code);
   }
 
   if (serial_no) {
@@ -184,7 +134,7 @@ export const getLabelReceives = async (req, res) => {
       defaultLimit: 50,
       maxLimit: 500,
     });
-    const { whereSql, params } = buildReceiveWhere(req.query);
+    const { whereSql, params } = buildLabelWhere(req.query, { includeSearch: true });
 
     const toWarehouseNameSql = getToWarehouseNameSelectSql();
 
@@ -231,7 +181,7 @@ export const getLabelReceives = async (req, res) => {
 
       FROM tm_receive_serials rs
 
-      ${getMasterJoinSql()}
+      ${getReceiveMasterJoinSql()}
       ${getPrintSummaryJoinSql()}
 
       ${whereSql}
@@ -262,9 +212,6 @@ export const getLabelReceives = async (req, res) => {
           rs.receive_code
 
         FROM tm_receive_serials rs
-
-        ${getMasterJoinSql()}
-        ${getPrintSummaryJoinSql()}
 
         ${whereSql}
 
@@ -306,7 +253,7 @@ export const getLabelSerials = async (req, res) => {
       defaultLimit: 50,
       maxLimit: 500,
     });
-    const { whereSql, params } = buildSerialWhere(req.query);
+    const { whereSql, params } = buildLabelWhere(req.query, { exactReceiveCode: true });
 
     const toWarehouseNameSql = getToWarehouseNameSelectSql();
     const fromWarehouseNameSql = getFromWarehouseNameSelectSql();
@@ -388,7 +335,7 @@ export const getLabelSerials = async (req, res) => {
 
       FROM tm_receive_serials rs
 
-      ${getMasterJoinSql()}
+      ${getSerialMasterJoinSql()}
       ${getPrintSummaryJoinSql()}
 
       ${whereSql}
@@ -407,9 +354,6 @@ export const getLabelSerials = async (req, res) => {
         COUNT(*) AS total
 
       FROM tm_receive_serials rs
-
-      ${getMasterJoinSql()}
-      ${getPrintSummaryJoinSql()}
 
       ${whereSql}
       `,
@@ -508,6 +452,7 @@ export const markLabelsPrinted = async (req, res) => {
     const printType = is_reprint ? "REPRINT" : "PRINT";
 
     const now = new Date();
+    const printSummaryKeys = serialRows.map((row) => [row.serial_id, row.customer_id]);
 
     const insertValues = serialRows.map((row) => [
       row.receive_code || null,
@@ -539,9 +484,14 @@ export const markLabelsPrinted = async (req, res) => {
       [insertValues],
     );
 
+    const summaryKeyPlaceholders = printSummaryKeys.map(() => "(?, ?)").join(",");
+    const summaryParams = printSummaryKeys.flat();
+
     const [summaryRows] = await connection.query(
       `
         SELECT
+          serial_id,
+          customer_id,
           serial_no,
           COUNT(*) AS print_count,
 
@@ -554,10 +504,10 @@ export const markLabelsPrinted = async (req, res) => {
 
           MAX(created_at) AS last_printed_at
         FROM logs_label_print
-        WHERE serial_no IN (${placeholders})
-        GROUP BY serial_no
+        WHERE (serial_id, customer_id) IN (${summaryKeyPlaceholders})
+        GROUP BY serial_id, customer_id, serial_no
       `,
-      serialNos,
+      summaryParams,
     );
 
     await connection.commit();

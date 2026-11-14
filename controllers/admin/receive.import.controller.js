@@ -21,6 +21,7 @@ import {
   buildImportHeadData,
   buildImportDetailData,
   buildImportDetailItemData,
+  makeAutoImportSerial,
   createActiveSerialOrThrow,
   getPackageByCode,
   insertImportReceiveReference,
@@ -166,6 +167,8 @@ export const importReceivesFromExcel = async (req, res) => {
         receiveId,
       });
 
+      let autoSerialRunning = 1;
+
       for (const row of billRows) {
         const packageData = await getPackageByCode({
           conn,
@@ -189,7 +192,12 @@ export const importReceivesFromExcel = async (req, res) => {
 
         const receiveDetailId = detailResult.insertId;
 
-        const productSerial = row.serial_no ? await createActiveSerialOrThrow(conn, row.serial_no, now) : null;
+        const serialNo =
+          row.is_serial_no === "N"
+            ? makeAutoImportSerial(receiveCode, autoSerialRunning++)
+            : row.serial_no;
+
+        const productSerial = serialNo ? await createActiveSerialOrThrow(conn, serialNo, now) : null;
 
         const itemData = buildImportDetailItemData({
           receiveDetailId,
@@ -220,7 +228,7 @@ export const importReceivesFromExcel = async (req, res) => {
         sourceType: "IMPORT",
         sourceImportId: importId,
         detailCount: billRows.length,
-        itemCount: billRows.filter((row) => row.serial_no).length,
+        itemCount: billRows.filter((row) => row.is_serial_no === "N" || row.serial_no).length,
         createdBy: userId,
         now,
       });

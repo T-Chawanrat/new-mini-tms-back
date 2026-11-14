@@ -793,6 +793,12 @@ export const buildImportDetailItemData = ({ receiveDetailId, productSerial }) =>
   };
 };
 
+// สร้าง SN สำหรับแถว Excel ที่ระบุ IS_SERIAL_NO = N
+// รูปแบบ: DO-A000021-20260615-0001-001
+export const makeAutoImportSerial = (receiveCode, running) => {
+  return `${receiveCode}-${padRunningNumber(running, 3)}`;
+};
+
 export const createActiveSerialOrThrow = async (conn, serialNo, now) => {
   return createActiveProductSerialOrThrow({
     conn,

@@ -44,6 +44,9 @@ export const getReceiveShippers = async (req, res) => {
   try {
     const { customer_id } = req.params;
     const { search } = req.query;
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 10), 100);
+    const offset = (page - 1) * limit;
 
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
@@ -64,6 +67,12 @@ export const getReceiveShippers = async (req, res) => {
         )
       `;
     }
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM mm_shippers s
+      ${whereSql}
+    `;
 
     const dataSql = `
       SELECT
@@ -92,17 +101,20 @@ export const getReceiveShippers = async (req, res) => {
       ${whereSql}
 
       ORDER BY s.shipper_id ASC
+      LIMIT ? OFFSET ?
     `;
 
-    const [rows] = await db.query(dataSql, params);
+    const [[countResult]] = await db.query(countSql, params);
+    const [rows] = await db.query(dataSql, [...params, limit, offset]);
+    const total = Number(countResult?.total || 0);
 
     return res.json({
       data: rows,
       pagination: {
-        page: 1,
-        limit: rows.length,
-        total: rows.length,
-        totalPages: 1,
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (err) {
@@ -115,6 +127,9 @@ export const getReceiveRecipients = async (req, res) => {
   try {
     const { customer_id } = req.params;
     const { search } = req.query;
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 10), 100);
+    const offset = (page - 1) * limit;
 
     if (!customer_id) {
       return res.status(400).json({ message: "customer_id is required" });
@@ -139,7 +154,47 @@ export const getReceiveRecipients = async (req, res) => {
       `;
     }
 
-    const dataSql = `
+    const recipientJoinSql = `
+      FROM mm_recipients r
+      ${search ? `
+        LEFT JOIN mm_recipient_details rd
+          ON rd.recipient_id = r.recipient_id
+          AND rd.is_deleted = 'N'
+      ` : ""}
+    `;
+
+    const countSql = `
+      SELECT COUNT(DISTINCT r.recipient_id) AS total
+      ${recipientJoinSql}
+      ${whereSql}
+    `;
+
+    const recipientPageSql = `
+      SELECT DISTINCT r.recipient_id
+      ${recipientJoinSql}
+      ${whereSql}
+      ORDER BY r.recipient_id DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [[countResult]] = await db.query(countSql, params);
+    const [recipientPageRows] = await db.query(recipientPageSql, [...params, limit, offset]);
+    const recipientIds = recipientPageRows.map((row) => row.recipient_id);
+    const total = Number(countResult?.total || 0);
+
+    if (!recipientIds.length) {
+      return res.json({
+        data: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
+    }
+
+    const detailSql = `
       SELECT
         r.recipient_id,
         r.recipient_code,
@@ -160,7 +215,6 @@ export const getReceiveRecipients = async (req, res) => {
         a.province_name
 
       FROM mm_recipients r
-
       LEFT JOIN mm_recipient_details rd
         ON rd.recipient_id = r.recipient_id
         AND rd.is_deleted = 'N'
@@ -170,7 +224,9 @@ export const getReceiveRecipients = async (req, res) => {
         AND a.district_id = rd.district_id
         AND a.province_id = rd.province_id
 
-      ${whereSql}
+      WHERE r.customer_id = ?
+        AND r.is_deleted = 'N'
+        AND r.recipient_id IN (${recipientIds.map(() => "?").join(", ")})
 
       ORDER BY
         r.recipient_id DESC,
@@ -178,17 +234,15 @@ export const getReceiveRecipients = async (req, res) => {
         rd.recipient_detail_id DESC
     `;
 
-    const [rows] = await db.query(dataSql, params);
-
-    const total = rows.length;
+    const [rows] = await db.query(detailSql, [customer_id, ...recipientIds]);
 
     return res.json({
       data: rows,
       pagination: {
-        page: 1,
-        limit: total,
+        page,
+        limit,
         total,
-        totalPages: 1,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (err) {

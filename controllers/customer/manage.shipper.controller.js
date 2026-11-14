@@ -14,8 +14,12 @@ export const getShippers = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const customerIdParam = req.params.customer_id;
-    const { customer_id, search } = req.query;
+    const { search } = req.query;
+    const customerId = Number(req.user.customer_id);
+
+    if (!Number.isInteger(customerId) || customerId <= 0) {
+      return res.status(403).json({ message: "customer user has no customer_id" });
+    }
 
     let sql = `
       SELECT
@@ -60,16 +64,8 @@ export const getShippers = async (req, res) => {
 
     const params = [];
 
-    if (Number(req.user.role_id) === 2) {
-      sql += ` AND s.customer_id = ?`;
-      params.push(req.user.customer_id);
-    } else if (customerIdParam) {
-      sql += ` AND s.customer_id = ?`;
-      params.push(customerIdParam);
-    } else if (customer_id) {
-      sql += ` AND s.customer_id = ?`;
-      params.push(customer_id);
-    }
+    sql += ` AND s.customer_id = ?`;
+    params.push(customerId);
 
     if (search) {
       sql += `
@@ -794,9 +790,10 @@ export const getShipperROCodes = async (req, res) => {
       return res.status(401).json({ message: "unauthorized" });
     }
 
-    const { customer_id, shipper_id } = req.params;
+    const { shipper_id } = req.params;
+    const customerId = Number(req.user.customer_id);
 
-    if (!customer_id || !shipper_id) {
+    if (!Number.isInteger(customerId) || customerId <= 0 || !shipper_id) {
       return res.status(400).json({
         message: "customer_id / shipper_id required",
       });
@@ -811,7 +808,7 @@ export const getShipperROCodes = async (req, res) => {
         AND is_deleted = 'N'
       LIMIT 1
       `,
-      [shipper_id, customer_id],
+      [shipper_id, customerId],
     );
 
     if (shipperRows.length === 0) {

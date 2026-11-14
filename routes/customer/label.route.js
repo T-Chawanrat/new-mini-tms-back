@@ -10,11 +10,11 @@ import {
 
 const router = express.Router();
 
-router.get("/receives", getLabelReceives);
-router.get("/serials", getLabelSerials);
+router.get("/receives", auth, getLabelReceives);
+router.get("/serials", auth, getLabelSerials);
 
 router.post("/print", auth, markLabelsPrinted);
-router.get("/:serialNo/history", getLabelPrintHistory);
+router.get("/:serialNo/history", auth, getLabelPrintHistory);
 
 export default router;
 

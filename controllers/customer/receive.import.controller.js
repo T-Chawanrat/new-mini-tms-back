@@ -45,13 +45,13 @@ export const importReceivesFromExcel = async (req, res) => {
       });
     }
 
-    const customerId = toNumberOrNull(req.body.customer_id);
+    const customerId = toNumberOrNull(req.user?.customer_id);
     const assignedWarehouseId = toNumberOrNull(req.body.assigned_warehouse_id);
 
     if (!customerId) {
       return res.status(400).json({
         success: false,
-        message: "กรุณาเลือก Customer ก่อนนำเข้า",
+        message: "ไม่พบ Customer ของผู้ใช้งาน",
       });
     }
 
@@ -281,13 +281,13 @@ export const validateReceiveImportRows = async (req, res) => {
   const conn = await db.getConnection();
 
   try {
-    const customerId = toNumberOrNull(req.body.customer_id);
+    const customerId = toNumberOrNull(req.user?.customer_id);
     const inputRows = req.body.rows;
 
     if (!customerId) {
       return res.status(400).json({
         success: false,
-        message: "กรุณาเลือก Customer ก่อนตรวจสอบข้อมูล",
+        message: "ไม่พบ Customer ของผู้ใช้งาน",
       });
     }
 
